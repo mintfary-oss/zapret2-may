@@ -15,8 +15,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/mintfary-oss/freenet/internal/config"
 	"github.com/mintfary-oss/freenet/internal/logs"
@@ -24,7 +22,7 @@ import (
 	"github.com/mintfary-oss/freenet/internal/web"
 )
 
-const version = "0.3.0"
+const version = "1.1.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
@@ -86,17 +84,13 @@ func main() {
 	log.Printf("web UI  → http://localhost%s", *webAddr)
 	log.Printf("SOCKS5  → %s", cfg.Proxy.ListenAddr)
 
-	// On Windows open the browser automatically if not running as a service.
+	// On Windows (interactive), open the browser and show the tray icon.
+	// On Linux/macOS or when running as a service, just wait for a signal.
 	if !isWindowsService() {
 		openBrowser("http://localhost" + *webAddr)
 	}
 
-	// Block until SIGINT / SIGTERM.
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
+	// runApp blocks until the user quits (via tray on Windows, or SIGINT on Linux).
+	runApp(cfg, *webAddr, srv, ui)
 	log.Println("shutting down…")
-	srv.Stop()
-	ui.Stop()
 }
