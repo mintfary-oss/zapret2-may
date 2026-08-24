@@ -236,6 +236,32 @@ tool (
 
 ---
 
+### ERR-CI-06: `curl: (22) The requested URL returned error: 404` (WinDivert)
+
+**Workflow job:** Package Windows bundle (+ WinDivert) → Download WinDivert
+
+**Ошибка:**
+```
+curl: (22) The requested URL returned error: 404
+```
+
+**Причина:** Хардкод версии `v2.4.5` в CI — такого релиза не существует.
+Актуальная версия WinDivert на момент разработки: `v2.2.2`.
+
+**Исправление:** Убрана хардкоженная версия. URL теперь разрешается динамически
+через GitHub API (latest release):
+```yaml
+WD_URL=$(curl -fsSL https://api.github.com/repos/basil00/WinDivert/releases/latest \
+  | python3 -c "import sys,json; r=json.load(sys.stdin); \
+    print(next(a['browser_download_url'] for a in r['assets'] if a['name'].endswith('.zip')))")
+curl -fsSL -o /tmp/windivert.zip "$WD_URL"
+```
+Также путь к x64-файлам внутри ZIP теперь ищется через `find` вместо хардкода.
+
+**Коммит:** `fix: WinDivert download — use latest release URL via GitHub API`
+
+---
+
 ## Статистика ошибок
 
 | Категория | Количество | Статус |
@@ -243,5 +269,5 @@ tool (
 | Ошибки компиляции Go | 3 | ✅ Исправлены |
 | Ошибки аутентификации | 2 | ✅ Исправлены |
 | Ограничения реализации | 2 | 🔄 В плане |
-| Ошибки CI/CD | 5 | ✅ Исправлены |
-| **Итого** | **12** | |
+| Ошибки CI/CD | 6 | ✅ Исправлены |
+| **Итого** | **13** | |

@@ -10,7 +10,7 @@
 6. [SOCKS5 прокси](#6-socks5-прокси)
 7. [Веб-интерфейс](#7-веб-интерфейс)
 8. [Android архитектура](#8-android-архитектура)
-9. [Windows интеграция](#9-windows-интеграция)
+9. [Windows интеграция](#9-windows-интеграция) (трей, системный прокси, WinDivert, служба)
 10. [Конфигурация](#10-конфигурация)
 11. [Сборка и деплой](#11-сборка-и-деплой)
 12. [CI/CD pipeline](#12-cicd-pipeline)
@@ -720,7 +720,69 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 `SendMessageTimeout(HWND_BROADCAST, ...)` — Chrome, Edge, Firefox подхватывают изменения
 без перезапуска.
 
-### 9.3 Windows Service
+### 9.3 WinDivert — перехват на уровне ядра
+
+**Файлы:** `internal/windivert/windivert_windows.go`, `cmd/freenet/windivert_windows.go`
+
+WinDivert перехватывает все исходящие TCP-пакеты на порт 443 до того, как они
+покидают сетевой стек. Это позволяет применять DPI bypass для **всех приложений**
+без настройки SOCKS5 прокси.
+
+**Загрузка DLL без CGO:**
+```go
+// Загрузка WinDivert.dll через стандартный syscall.NewLazyDLL
+// Нет CGO — кросс-компиляция с Linux работает без изменений.
+var (
+    winDivertDLL        = syscall.NewLazyDLL("WinDivert.dll")
+    procWinDivertOpen   = winDivertDLL.NewProc("WinDivertOpen")
+    procWinDivertRecv   = winDivertDLL.NewProc("WinDivertRecv")
+    procWinDivertSend   = winDivertDLL.NewProc("WinDivertSend")
+    procWinDivertCalcCS = winDivertDLL.NewProc("WinDivertHelperCalcChecksums")
+)
+```
+
+**Фильтр перехвата:**
+```
+outbound and !loopback and tcp.DstPort == 443
+```
+Перехватываются только исходящие не-loopback TCP-пакеты на 443.
+SOCKS5 соединения через 127.0.0.1 исключаются автоматически (loopback).
+
+**Алгоритм обработки пакета:**
+```
+Получить пакет (WinDivertRecv)
+    ↓
+IPv4 TCP? Нет → реинъекция без изменений
+    ↓
+Есть payload? Нет (SYN/ACK) → реинъекция
+    ↓
+TLS ClientHello? (0x16 0x03, HandshakeType=0x01)
+Нет → реинъекция
+    ↓
+HasECH? Да → реинъекция (SNI уже зашифрован, bypass не нужен)
+    ↓
+Применить стратегию:
+  split/combined/auto → split на позиции SNI (два пакета)
+  tlsrec             → split после TLS record header (+5 байт)
+  иное               → реинъекция
+    ↓
+Пересчитать контрольные суммы (WinDivertHelperCalcChecksums)
+    ↓
+Реинъекция (WinDivertSend)
+```
+
+**Трей-статус:**
+```
+⚡ WinDivert: активен (все приложения)   ← если DLL загружена и работает
+○ WinDivert: остановлен                  ← если bypass выключен
+○ WinDivert: dll не найден (SOCKS5 активен)  ← если WinDivert.dll отсутствует
+```
+
+**Fallback:** Если `WinDivert.dll` отсутствует, FreeNet работает в SOCKS5+системный
+прокси режиме. Это обеспечивает совместимость с системами без привилегий
+администратора.
+
+### 9.4 Windows Service
 
 **Файл:** `cmd/freenet/service_windows.go`
 

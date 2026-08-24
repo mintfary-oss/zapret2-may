@@ -12,8 +12,10 @@ go-freenet/
 │   ├── main.go                       # точка входа, CLI флаги
 │   ├── service_stub.go               # заглушка для не-Windows
 │   ├── service_windows.go            # Windows Service (Install/Uninstall)
-│   ├── tray_windows.go               # системный трей (Windows)
-│   └── tray_stub.go                  # заглушка трея (Linux/macOS)
+│   ├── tray_windows.go               # системный трей (Windows) + WinDivert статус
+│   ├── tray_stub.go                  # заглушка трея (Linux/macOS)
+│   ├── windivert_windows.go          # lifecycle WinDivert (start/stop/restart)
+│   └── windivert_stub.go             # заглушка WinDivert (Linux/macOS)
 ├── internal/
 │   ├── bypass/
 │   │   ├── engine.go                 # выбор и запуск стратегии обхода DPI
@@ -48,6 +50,10 @@ go-freenet/
 │   │   └── notify_windows.go         # WM_SETTINGCHANGE broadcast
 │   ├── types/
 │   │   └── types.go                  # общие структуры (StatsSnapshot, etc.)
+│   ├── windivert/
+│   │   ├── windivert.go              # пакет-заголовок + doc
+│   │   ├── windivert_windows.go      # DLL loader (syscall.NewLazyDLL) + перехват + TLS split
+│   │   └── windivert_stub.go         # заглушка (Linux/macOS)
 │   └── web/
 │       └── ui.go                     # веб-UI + WebSocket логи + DoH статус
 ├── mobile/                           # gomobile-bindable API (публичный пакет)
@@ -127,8 +133,9 @@ go-freenet/
 | Платформа | Файл | Способ установки |
 |-----------|------|-----------------|
 | Android | `freenet-android.apk` | Скачать → установить APK |
-| Windows | `freenet-windows-amd64.exe` | `freenet.exe -install` (служба) |
-| Windows (авто) | `install-windows.ps1` | PowerShell one-liner |
+| Windows (рекомендуется) | `freenet-windows-bundle.zip` | Распаковать → `freenet.exe -install` (Администратор) |
+| Windows (bare exe) | `freenet-windows-amd64.exe` | `freenet.exe -install` (без WinDivert) |
+| Windows (авто) | `install-windows.ps1` | PowerShell one-liner (скачивает bundle) |
 | Linux x86-64 | `freenet-linux-amd64` | бинарник или installer |
 | Linux ARM64 | `freenet-linux-arm64` | бинарник или installer |
 | Linux ARMv7 | `freenet-linux-armv7` | Raspberry Pi / роутеры |
@@ -151,6 +158,7 @@ Jobs:
 - `Build` (matrix: linux/amd64, arm64, armv7, windows/amd64) — кросс-компиляция
 - `Android APK` — gomobile AAR + Gradle APK
 - `Package Linux installer` — installer.tar.gz
+- `Package Windows bundle` — скачивает WinDivert (latest), создаёт freenet-windows-bundle.zip
 - `Create GitHub Release` — только при tag-пуше
 
 ---
