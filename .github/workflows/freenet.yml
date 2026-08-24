@@ -1,0 +1,235 @@
+name: Build & Release FreeNet
+
+# push branches (paths-filtered) → build + test
+# push v* tag                    → build + create GitHub Release
+# pull_request (paths-filtered)  → build + test
+# workflow_dispatch               → manual trigger from Actions UI
+on:
+  push:
+    branches: ["master", "main", "neo/**"]
+    tags:     ["freenet-v*.*.*"]
+    paths:    ["go-freenet/**"]
+  pull_request:
+    paths: ["go-freenet/**"]
+  workflow_dispatch: {}
+
+defaults:
+  run:
+    working-directory: go-freenet
+
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+
+  # ── lint & vet ─────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: go-freenet/go.sum
+      - name: go vet
+        run: go vet ./...
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "Files need formatting:"; echo "$out"; exit 1; fi
+
+  # ── Linux & Windows binaries ───────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        include:
+          - {goos: linux,   goarch: amd64, artifact: freenet-linux-amd64}
+          - {goos: linux,   goarch: arm64, artifact: freenet-linux-arm64}
+          - {goos: linux,   goarch: arm,   goarm: "7", artifact: freenet-linux-armv7}
+          - {goos: windows, goarch: amd64, artifact: freenet-windows-amd64.exe}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: go-freenet/go.sum
+      - name: Build
+        env:
+          GOOS:        ${{ matrix.goos }}
+          GOARCH:      ${{ matrix.goarch }}
+          GOARM:       ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -ldflags="-s -w" -o dist/${{ matrix.artifact }} ./cmd/freenet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: go-freenet/dist/${{ matrix.artifact }}
+          retention-days: 30
+
+  # ── Android APK (gomobile + Gradle) ────────────────────────────────────────
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: go-freenet/go.sum
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK
+        run: sdkmanager "ndk;26.3.11579264"
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+
+      - name: Build Android AAR
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.3.11579264
+        run: |
+          mkdir -p dist
+          gomobile bind \
+            -target android/arm64,android/arm,android/amd64 \
+            -androidapi 26 \
+            -javapkg com.freenet.bypass \
+            -o dist/mobile.aar \
+            ./internal/mobile
+
+      - name: Build Android APK
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.3.11579264
+        run: |
+          mkdir -p android/app/libs
+          cp dist/mobile.aar android/app/libs/mobile.aar
+          cd android
+          gradle wrapper --gradle-version=8.11.1 --no-daemon
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../dist/freenet-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-aar
+          path: go-freenet/dist/mobile.aar
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freenet-android.apk
+          path: go-freenet/dist/freenet-android.apk
+          retention-days: 30
+
+  # ── Linux installer bundle ─────────────────────────────────────────────────
+  package-linux:
+    name: Package Linux installer
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: freenet-linux-amd64
+          path: go-freenet/dist/
+      - name: Create Linux installer bundle
+        run: |
+          mkdir -p bundle/freenet
+          cp dist/freenet-linux-amd64      bundle/freenet/freenet
+          cp scripts/install.sh             bundle/freenet/install.sh
+          cp init.d/systemd/freenet.service bundle/freenet/freenet.service
+          chmod +x bundle/freenet/freenet bundle/freenet/install.sh
+          tar -C bundle -czf dist/freenet-linux-amd64-installer.tar.gz freenet/
+          echo "Bundle contents:"; tar -tzf dist/freenet-linux-amd64-installer.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freenet-linux-amd64-installer
+          path: go-freenet/dist/freenet-linux-amd64-installer.tar.gz
+          retention-days: 30
+
+  # ── GitHub Release (runs only on v* tag push) ──────────────────────────────
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build, android, package-linux]
+    if: startsWith(github.ref, 'refs/tags/freenet-v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Artifacts download into go-freenet/dist/ (matches default working-dir).
+      - uses: actions/download-artifact@v4
+        with:
+          path: go-freenet/dist/
+          merge-multiple: true
+
+      # Install scripts are copied relative to the go-freenet/ working-dir.
+      - name: Add install scripts to release
+        run: |
+          cp scripts/install.sh          dist/install.sh
+          cp scripts/install-windows.ps1 dist/install-windows.ps1
+          chmod +x dist/install.sh
+
+      - name: List release artifacts
+        run: ls -lh dist/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: "FreeNet ${{ github.ref_name }}"
+          body: |
+            ## FreeNet ${{ github.ref_name }} — Обход DPI / DPI bypass
+
+            ### ⚡ Установка одной командой
+
+            **🤖 Android** — скачай APK и установи (включи «Установка из неизвестных источников»):
+            👉 **[freenet-android.apk](https://github.com/${{ github.repository }}/releases/latest/download/freenet-android.apk)**
+
+            **🪟 Windows** — PowerShell от Администратора:
+            ```powershell
+            irm https://github.com/${{ github.repository }}/releases/latest/download/install-windows.ps1 | iex
+            ```
+            Или скачай `freenet-windows-amd64.exe` и запусти: `freenet-windows-amd64.exe -install`
+
+            **🐧 Linux** — одна команда:
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sudo bash
+            ```
+
+            **🐳 Docker:**
+            ```bash
+            git clone https://github.com/${{ github.repository }} && cd zapret2-may/go-freenet && docker compose up -d
+            ```
+
+            ---
+
+            | Платформа | Файл | Инструкция |
+            |-----------|------|------------|
+            | 🤖 Android | `freenet-android.apk` | Скачать → установить APK |
+            | 🪟 Windows (авто) | `install-windows.ps1` | PowerShell one-liner |
+            | 🪟 Windows (вручную) | `freenet-windows-amd64.exe` | Запустить `-install` |
+            | 🐧 Linux bundle | `freenet-linux-amd64-installer.tar.gz` | Распаковать → `sudo bash install.sh` |
+            | 🐧 Linux one-liner | `install.sh` | `curl … | sudo bash` |
+            | 🐧 Linux amd64 | `freenet-linux-amd64` | Bare binary |
+            | 🐧 Linux arm64 | `freenet-linux-arm64` | Bare binary |
+            | 🐧 Linux ARMv7 | `freenet-linux-armv7` | Bare binary (Raspberry Pi) |
+            | 🐳 Android AAR | `mobile.aar` | Для разработчиков |
+
+          generate_release_notes: true
+          files: dist/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
