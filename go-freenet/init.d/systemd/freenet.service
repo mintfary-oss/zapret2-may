@@ -1,0 +1,37 @@
+[Unit]
+Description=FreeNet — DPI bypass (Russia / RKN / TSPU)
+Documentation=https://github.com/mintfary-oss/zapret2-may
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=freenet
+Group=freenet
+
+# Binary and configuration paths set by the install script.
+ExecStart=/usr/local/bin/freenet \
+    -config /etc/freenet/config.yaml \
+    -web 127.0.0.1:8080
+
+# Allow binding to low ports if needed (e.g. port 80 redirect).
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/etc/freenet /var/lib/freenet
+PrivateTmp=yes
+PrivateDevices=yes
+
+# Logging goes to journald — view with: journalctl -u freenet -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
