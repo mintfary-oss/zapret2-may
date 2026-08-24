@@ -1,0 +1,10 @@
+# Compiled binaries
+dist/
+
+# Config and domain list (may contain sensitive paths)
+config.yaml
+domains.lst
+domains.lst.tmp
+
+# Local data
+data/

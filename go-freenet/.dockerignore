@@ -1,0 +1,9 @@
+# Exclude development artifacts from Docker build context.
+*.md
+.git
+.gitignore
+*.log
+domains.lst
+domains.lst.tmp
+config.yaml
+data/

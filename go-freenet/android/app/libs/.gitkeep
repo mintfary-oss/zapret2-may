@@ -1,0 +1,3 @@
+# This directory holds the gomobile-generated mobile.aar.
+# Build it with: cd go-freenet && scripts/build-android.sh
+# The .aar itself is excluded from git (see ../.gitignore).

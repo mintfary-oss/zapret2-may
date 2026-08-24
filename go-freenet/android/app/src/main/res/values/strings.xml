@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FreeNet</string>
+    <string name="app_description">DPI bypass — обход блокировок</string>
+
+    <!-- Main screen -->
+    <string name="btn_connect">Включить</string>
+    <string name="btn_disconnect">Выключить</string>
+    <string name="status_connected">Подключено</string>
+    <string name="status_connecting">Подключение…</string>
+    <string name="status_disconnected">Отключено</string>
+
+    <!-- Strategy labels -->
+    <string name="strategy_auto">Авто</string>
+    <string name="strategy_split">Split</string>
+    <string name="strategy_tlsrec">TLS Record</string>
+    <string name="strategy_combined">Combined</string>
+    <string name="strategy_none">Без обхода</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Настройки</string>
+    <string name="settings_strategy">Стратегия обхода</string>
+    <string name="settings_proxy_port">Порт SOCKS5</string>
+    <string name="settings_autostart">Запуск при загрузке</string>
+
+    <!-- Notification -->
+    <string name="notification_channel_name">FreeNet VPN</string>
+    <string name="notification_channel_desc">Уведомление активного VPN соединения</string>
+    <string name="notification_title">FreeNet активен</string>
+    <string name="notification_text">Обход блокировок включён</string>
+    <string name="notification_action_stop">Остановить</string>
+
+    <!-- Permissions / dialogs -->
+    <string name="vpn_permission_title">Разрешение VPN</string>
+    <string name="vpn_permission_message">FreeNet запросит разрешение на создание VPN соединения для обхода DPI блокировок.</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Отмена</string>
+</resources>

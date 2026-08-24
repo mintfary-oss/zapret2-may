@@ -1,0 +1,47 @@
+version: "3.9"
+
+# FreeNet — DPI bypass for Russia / RKN / TSPU
+# Usage:
+#   docker compose up -d
+# Web UI will be available at http://localhost:8080
+# SOCKS5 proxy at 127.0.0.1:1080
+
+services:
+  freenet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: freenet
+    restart: unless-stopped
+
+    # NET_ADMIN is required for iptables transparent proxy rules.
+    # Remove if you only use SOCKS5 mode.
+    cap_add:
+      - NET_ADMIN
+
+    ports:
+      # Web control panel
+      - "127.0.0.1:8080:8080"
+      # SOCKS5 proxy (configure your browser/system to use this)
+      - "127.0.0.1:1080:1080"
+      # Transparent proxy (optional, used with iptables REDIRECT)
+      - "127.0.0.1:1090:1090"
+
+    volumes:
+      # Persist config.yaml and domain lists between restarts.
+      - freenet-data:/app/data
+
+    environment:
+      # Set to "1" to enable iptables transparent proxy rules inside container.
+      TRANSPARENT_PROXY: "0"
+      TRANSPARENT_PORT: "1090"
+      FREENET_WEB: ":8080"
+      FREENET_CONFIG: "/app/data/config.yaml"
+
+    # Optional: use host networking for transparent proxy to intercept all
+    # host traffic. Uncomment and remove the ports section above.
+    # network_mode: host
+
+volumes:
+  freenet-data:
+    driver: local
