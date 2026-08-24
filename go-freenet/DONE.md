@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.6.0 — Phase 1–7 (Android улучшения) завершены
+## Текущая версия: v1.6.0 — Phase 1–7 завершены
 
 ---
 
@@ -9,16 +9,16 @@
 ```
 go-freenet/
 ├── cmd/freenet/
-│   ├── main.go                       # точка входа, CLI флаги
+│   ├── main.go                       # точка входа, CLI флаги (v1.6.0)
 │   ├── service_stub.go               # заглушка для не-Windows
 │   ├── service_windows.go            # Windows Service (Install/Uninstall)
-│   ├── tray_windows.go               # системный трей (Windows) + WinDivert статус
+│   ├── tray_windows.go               # системный трей + WinDivert статус
 │   ├── tray_stub.go                  # заглушка трея (Linux/macOS)
 │   ├── windivert_windows.go          # lifecycle WinDivert (start/stop/restart)
 │   └── windivert_stub.go             # заглушка WinDivert (Linux/macOS)
 ├── internal/
 │   ├── bypass/
-│   │   ├── engine.go                 # выбор и запуск стратегии обхода DPI
+│   │   ├── engine.go                 # выбор и запуск стратегии + ECH passthrough
 │   │   ├── split.go                  # TCP фрагментация на позиции SNI
 │   │   ├── disorder.go               # disorder атака (head/tail + пауза)
 │   │   ├── tlsrec.go                 # TLS record layer splitting
@@ -26,18 +26,18 @@ go-freenet/
 │   │   ├── fake_linux.go             # fake packets — raw socket (Linux)
 │   │   ├── fake_stub.go              # fake packets — заглушка (не-Linux)
 │   │   ├── quic.go                   # QUIC/HTTP3 bypass (UDP 443)
-│   │   ├── tls.go                    # парсер TLS ClientHello / SNI offset
+│   │   ├── tls.go                    # парсер TLS ClientHello / SNI / ECH (0xFE0D)
 │   │   ├── autodetect.go             # авто-подбор стратегии под провайдера
 │   │   └── hostlist.go               # фильтрация по доменам (antizapret)
 │   ├── config/
 │   │   └── config.go                 # YAML конфигурация (incl. DNSConfig)
 │   ├── dns/
-│   │   ├── doh.go                    # DoH-клиент RFC 8484 + HTTP-клиент фабрика
+│   │   ├── doh.go                    # DoH-клиент RFC 8484 + ECH lookup (RFC 9460)
 │   │   └── resolver.go               # локальный UDP→DoH резолвер (127.0.0.1:5300)
 │   ├── logs/
 │   │   └── ring.go                   # кольцевой буфер логов + WebSocket pub
 │   ├── proxy/
-│   │   ├── server.go                 # управление сервером, lifecycle (+ DoH start)
+│   │   ├── server.go                 # управление сервером, lifecycle, DoH + ECH
 │   │   ├── socks5.go                 # SOCKS5 прокси (RFC 1928), полный
 │   │   ├── transparent.go            # прозрачный прокси, iptables REDIRECT
 │   │   ├── transparent_stub.go       # заглушка (Windows/macOS)
@@ -55,18 +55,25 @@ go-freenet/
 │   │   ├── windivert_windows.go      # DLL loader (syscall.NewLazyDLL) + перехват + TLS split
 │   │   └── windivert_stub.go         # заглушка (Linux/macOS)
 │   └── web/
-│       └── ui.go                     # веб-UI + WebSocket логи + DoH статус
+│       └── ui.go                     # веб-UI + WebSocket логи + DoH + ECH статус
 ├── mobile/                           # gomobile-bindable API (публичный пакет)
 │   ├── engine.go                     # FreenetEngine — SOCKS5 + VPN API
-│   └── tun.go                        # IPv4/TCP TUN + UDP DNS→DoH перехват
+│   ├── tun.go                        # IPv4 TUN: TCP + DNS→DoH + UDP dispatch
+│   └── tun_udp.go                    # UDP NAT relay (Discord, Steam, игры)
 ├── android/                          # Android Studio проект
 │   ├── app/src/main/
-│   │   ├── AndroidManifest.xml       # разрешения VpnService
+│   │   ├── AndroidManifest.xml       # VpnService + FreeNetWidget
+│   │   ├── res/
+│   │   │   ├── values/strings.xml    # строки приложения + виджет + split tunnel
+│   │   │   ├── layout/widget_toggle.xml  # layout 2×1 кнопки виджета
+│   │   │   └── xml/freenet_widget_info.xml  # AppWidget метаданные
 │   │   └── java/com/freenet/vpn/
-│   │       ├── MainActivity.kt       # Compose UI: кнопка, стратегия, лог
-│   │       ├── FreenetVpnService.kt  # VpnService + TUN lifecycle
+│   │       ├── MainActivity.kt       # Compose UI + SplitTunnelCard
+│   │       ├── FreenetVpnService.kt  # VpnService + split tunnel builder
+│   │       ├── FreeNetWidget.kt      # AppWidgetProvider (2×1 toggle)
+│   │       ├── SplitTunnelConfig.kt  # per-app SharedPreferences конфиг
 │   │       ├── PacketForwarder.kt    # Kotlin fallback tun2socks
-│   │       ├── VpnViewModel.kt       # MVVM state management
+│   │       ├── VpnViewModel.kt       # MVVM + splitTunnel StateFlow
 │   │       └── BootReceiver.kt       # автозапуск при загрузке
 │   ├── gradle/
 │   │   ├── libs.versions.toml        # version catalog
@@ -78,22 +85,22 @@ go-freenet/
 │   └── freenet.service               # systemd unit
 ├── scripts/
 │   ├── install.sh                    # установщик Linux (systemd)
-│   ├── install-windows.ps1           # PowerShell one-liner
+│   ├── install-windows.ps1           # PowerShell one-liner (скачивает bundle с WinDivert)
 │   ├── setup-transparent.sh          # настройка iptables REDIRECT
 │   ├── teardown-transparent.sh       # откат iptables
 │   ├── build-android.sh              # сборка gomobile AAR
 │   └── build-release-apk.sh          # полный pipeline: AAR → APK
 ├── .github/workflows/
-│   └── freenet.yml                   # CI/CD: build + release
+│   └── freenet.yml                   # CI/CD: lint + build + android + bundle + release
 ├── Dockerfile                        # multi-stage, финальный образ ~15 MB
 ├── docker-compose.yml                # одна команда запуска
 ├── docker-entrypoint.sh              # entrypoint с настройкой iptables
 ├── go.mod / go.sum                   # зависимости
 ├── CHAT.md                           # переписка с Neo
 ├── DONE.md                           # этот файл
-├── ERRORS.md                         # журнал ошибок
+├── ERRORS.md                         # журнал ошибок и исправлений
 ├── PLAN.md                           # план проекта
-├── TODO.md                           # задачи
+├── TODO.md                           # задачи и будущие фазы
 └── TECHNICAL.md                      # техническая документация
 ```
 
@@ -111,46 +118,72 @@ go-freenet/
 | `quic` | QUIC Initial datagram фрагментация (UDP 443) | нет | Средняя |
 | `auto` | Авто-тест всех стратегий, выбор лучшей | — | Адаптивная |
 | `none` | Без обхода (для отладки) | — | — |
+| **WinDivert** | Перехват пакетов на уровне ядра (Windows) | Администратор | Максимальная |
 
 ---
 
-## Реализованная DNS защита
+## DNS защита
 
 | Компонент | Что делает |
 |-----------|-----------|
-| `internal/dns/doh.go` | DoH-клиент RFC 8484: POST `application/dns-message` к 1.1.1.1/8.8.8.8/9.9.9.9 |
-| `internal/dns/resolver.go` | UDP резолвер на `127.0.0.1:5300`, форвардирует запросы через DoH |
-| `mobile/tun.go` | Android TUN перехватывает UDP порт 53, резолвит напрямую через DoH |
-| `internal/bypass/hostlist.go` | Загрузка списков через DoH-aware `*http.Client` |
-| `internal/proxy/server.go` | Запускает DoH резолвер при старте, передаёт его в hostlist |
-| `internal/web/ui.go` | `🔒 DNS-over-HTTPS активен · запросов: N` в веб UI |
-| `internal/config/config.go` | `dns.enabled`, `dns.listen_addr`, `dns.servers` в конфиге |
+| `internal/dns/doh.go` | DoH-клиент RFC 8484: POST к 1.1.1.1/8.8.8.8/9.9.9.9 |
+| `internal/dns/resolver.go` | UDP резолвер 127.0.0.1:5300 → DoH |
+| `mobile/tun.go` | Android TUN: UDP:53 → DoH (без root) |
+| `mobile/tun_udp.go` | Android TUN: прочий UDP → UDP NAT relay |
+| `internal/bypass/hostlist.go` | Загрузка списков через DoH-aware HTTP |
+| `internal/proxy/server.go` | Запуск DoH + ECH resolver при старте |
+| `internal/web/ui.go` | DoH + ECH статус в веб UI |
 
 ---
 
-## Платформы и артефакты
+## ECH (Encrypted Client Hello)
+
+| Компонент | Что делает |
+|-----------|-----------|
+| `internal/bypass/tls.go` | Парсит extension `0xFE0D` → `HasECH bool` |
+| `internal/bypass/engine.go` | ECH → passthrough без bypass (нет смысла разрывать) |
+| `internal/dns/doh.go` | `LookupECHConfig()` из DNS HTTPS (RFC 9460), `EnableECH()` |
+| `internal/web/ui.go` | `🔐 ECH обнаружен: N соед.` в веб UI |
+
+---
+
+## Android (v1.6.0)
+
+| Компонент | Что делает |
+|-----------|-----------|
+| `mobile/tun.go` | IPv4 TCP proxy + DNS→DoH + UDP relay dispatch |
+| `mobile/tun_udp.go` | UDP NAT: Discord/Steam/игры через VPN |
+| `FreenetVpnService.kt` | VpnService + IPv4-only routing + split tunnel |
+| `SplitTunnelConfig.kt` | Per-app: disabled/allowlist/blocklist (SharedPreferences) |
+| `FreeNetWidget.kt` | AppWidget 2×1: зелёная/красная кнопка на рабочем столе |
+| `VpnViewModel.kt` | MVVM + `splitTunnel: StateFlow<SplitTunnelConfig>` |
+| `MainActivity.kt` | Compose UI + `SplitTunnelCard` (поиск + чекбоксы) |
+
+---
+
+## Платформы и артефакты (GitHub Releases)
 
 | Платформа | Файл | Способ установки |
 |-----------|------|-----------------|
-| Android | `freenet-android.apk` | Скачать → установить APK |
-| Windows (рекомендуется) | `freenet-windows-bundle.zip` | Распаковать → `freenet.exe -install` (Администратор) |
-| Windows (bare exe) | `freenet-windows-amd64.exe` | `freenet.exe -install` (без WinDivert) |
-| Windows (авто) | `install-windows.ps1` | PowerShell one-liner (скачивает bundle) |
-| Linux x86-64 | `freenet-linux-amd64` | бинарник или installer |
-| Linux ARM64 | `freenet-linux-arm64` | бинарник или installer |
-| Linux ARMv7 | `freenet-linux-armv7` | Raspberry Pi / роутеры |
-| Linux bundle | `freenet-linux-amd64-installer.tar.gz` | tar + `sudo bash install.sh` |
-| Linux (авто) | `install.sh` | `curl … \| sudo bash` |
-| Docker | — | `docker compose up -d` |
-| Android AAR | `mobile.aar` | для разработчиков |
+| 🤖 Android | `freenet-android.apk` | Скачать → установить APK |
+| 🪟 Windows (рекомендуется) | `freenet-windows-bundle.zip` | Распаковать → `freenet.exe -install` (Admin) |
+| 🪟 Windows (bare exe) | `freenet-windows-amd64.exe` | `freenet.exe -install` (без WinDivert) |
+| 🪟 Windows (авто) | `install-windows.ps1` | PowerShell one-liner |
+| 🐧 Linux x86-64 | `freenet-linux-amd64` | бинарник или installer |
+| 🐧 Linux ARM64 | `freenet-linux-arm64` | бинарник или installer |
+| 🐧 Linux ARMv7 | `freenet-linux-armv7` | Raspberry Pi / роутеры |
+| 🐧 Linux bundle | `freenet-linux-amd64-installer.tar.gz` | tar + `sudo bash install.sh` |
+| 🐧 Linux (авто) | `install.sh` | `curl … | sudo bash` |
+| 🐳 Docker | — | `docker compose up -d` |
+| 📦 Android AAR | `mobile.aar` | Для разработчиков |
 
 ---
 
 ## GitHub Actions CI/CD
 
 Триггеры:
-- **Push в master/main/neo/\*\*** — сборка без релиза
-- **Tag `freenet-v*.*.*`** — сборка + создание GitHub Release с артефактами
+- **Push в master/main/neo/\*\*** — сборка + тесты без релиза
+- **Tag `freenet-v*.*.*`** — сборка + GitHub Release со всеми артефактами
 - **Pull Request** — сборка для проверки
 
 Jobs:
@@ -158,7 +191,7 @@ Jobs:
 - `Build` (matrix: linux/amd64, arm64, armv7, windows/amd64) — кросс-компиляция
 - `Android APK` — gomobile AAR + Gradle APK
 - `Package Linux installer` — installer.tar.gz
-- `Package Windows bundle` — скачивает WinDivert (latest), создаёт freenet-windows-bundle.zip
+- `Package Windows bundle` — WinDivert (latest) + freenet.exe → ZIP
 - `Create GitHub Release` — только при tag-пуше
 
 ---
@@ -166,9 +199,9 @@ Jobs:
 ## Как запустить
 
 ```bash
-# Docker (рекомендуется)
+# Docker (рекомендуется для Linux/сервера)
 cd go-freenet && docker compose up -d
-# → http://localhost:8080  (веб UI с большой кнопкой и статусом DoH)
+# → http://localhost:8080  (веб UI с большой кнопкой)
 # → 127.0.0.1:1080        (SOCKS5 прокси)
 # → 127.0.0.1:5300        (локальный DoH резолвер, UDP)
 
@@ -178,11 +211,13 @@ go build -o freenet ./cmd/freenet && ./freenet -web :8080
 # Linux как сервис
 sudo bash scripts/install.sh
 
-# Windows как сервис
-freenet-windows-amd64.exe -install
+# Windows (рекомендуется: bundle с WinDivert)
+# Скачать freenet-windows-bundle.zip → распаковать → запустить от Admin:
+freenet.exe -install
 
-# Android APK (при наличии NDK)
-bash scripts/build-release-apk.sh
+# Android APK
+# Скачать freenet-android.apk с GitHub Releases → установить
+# Или собрать: bash scripts/build-release-apk.sh
 ```
 
 ---
@@ -190,11 +225,11 @@ bash scripts/build-release-apk.sh
 ## Зависимости
 
 | Пакет | Версия | Назначение |
-|-------|--------|-----------| 
-| `github.com/gorilla/websocket` | v1.5.3 | WebSocket для логов |
-| `github.com/florianl/go-nfqueue/v2` | v2.1.0 | Netfilter queue (Linux) |
+|-------|--------|-----------|
+| `github.com/gorilla/websocket` | v1.5.3 | WebSocket для real-time логов |
+| `github.com/florianl/go-nfqueue/v2` | v2.1.0 | Netfilter queue (Linux, ядро) |
 | `golang.org/x/sys` | v0.47.0 | Системные вызовы (unix/windows) |
-| `golang.org/x/net` | v0.58.0 | `dns/dnsmessage` для DoH wire format |
+| `golang.org/x/net` | v0.58.0 | `dns/dnsmessage` DoH wire format |
 | `golang.org/x/mobile` | v0.0.0-20260821 | gomobile для Android |
 | `gopkg.in/yaml.v3` | v3.0.1 | YAML конфигурация |
 | `github.com/getlantern/systray` | v1.2.2 | Системный трей Windows/Linux |

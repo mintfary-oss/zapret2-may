@@ -15,14 +15,18 @@
 | Windows | ✅ | ❌ | частично | ✅ |
 | Android | ❌ | ✅ | частично | ✅ |
 | QUIC/HTTP3 | ❌ | ❌ | ✅ | ✅ |
-| ECH | ❌ | ❌ | ❌ | 🔄 план |
+| ECH | ❌ | ❌ | ❌ | ✅ |
 | Auto-detect ISP | ❌ | ❌ | ❌ | ✅ |
 | DNS-over-HTTPS | ❌ | ❌ | ❌ | ✅ |
 | Системный трей | ✅ | ❌ | ❌ | ✅ |
 | Авто системный прокси | ❌ | ❌ | ❌ | ✅ Windows |
+| WinDivert (ядро) | ✅ | ❌ | ❌ | ✅ |
+| Per-app фильтрация | ❌ | ❌ | ❌ | ✅ Android |
+| Home screen widget | ❌ | ❌ | ❌ | ✅ Android |
+| UDP relay (Discord/Steam) | ❌ | ❌ | ❌ | ✅ Android |
 | Веб UI | ❌ | ❌ | ❌ | ✅ |
 | Docker | ❌ | ❌ | ❌ | ✅ |
-| GitHub Release | ❌ | ❌ | ❌ | ✅ |
+| GitHub Release (auto) | ❌ | ❌ | ❌ | ✅ |
 | Один бинарник | ✅ | ✅ | ❌ | ✅ |
 | Язык | C | C | C+Lua | **Go** |
 
@@ -35,41 +39,44 @@ FreeNet Go
 │
 ├── Ядро (Go)
 │   ├── bypass/           Стратегии обхода DPI
-│   │   ├── split         TCP фрагментация на позиции SNI        ✅
-│   │   ├── disorder      Disorder атака (best-effort)           ✅
-│   │   ├── tlsrec        TLS record layer splitting             ✅
-│   │   ├── fake          Фейковые пакеты (raw socket)           ✅ Linux
-│   │   ├── combined      fake + tlsrec                          ✅
-│   │   ├── quic          QUIC Initial фрагментация              ✅
-│   │   ├── autodetect    Авто-выбор стратегии под ISP           ✅
-│   │   └── ech           Encrypted Client Hello (TLS 1.3)      🔄
+│   │   ├── split         TCP фрагментация на позиции SNI         ✅
+│   │   ├── disorder      Disorder атака (best-effort)            ✅
+│   │   ├── tlsrec        TLS record layer splitting              ✅
+│   │   ├── fake          Фейковые пакеты (raw socket, Linux)     ✅
+│   │   ├── combined      fake + tlsrec                           ✅
+│   │   ├── quic          QUIC Initial фрагментация               ✅
+│   │   ├── ech           ECH detect + passthrough                ✅
+│   │   └── autodetect    Авто-выбор стратегии под ISP            ✅
 │   │
 │   ├── dns/              DNS-over-HTTPS защита
-│   │   ├── doh           DoH-клиент RFC 8484                    ✅
-│   │   └── resolver      Локальный UDP→DoH резолвер             ✅
+│   │   ├── doh           DoH-клиент RFC 8484 + ECH               ✅
+│   │   └── resolver      Локальный UDP→DoH резолвер              ✅
 │   │
 │   ├── proxy/            Перехват трафика
-│   │   ├── socks5        SOCKS5 прокси (RFC 1928)               ✅
-│   │   ├── transparent   iptables REDIRECT (Linux)              ✅
-│   │   └── nfqueue       Netfilter queue (Linux, ядро)          ✅
+│   │   ├── socks5        SOCKS5 прокси (RFC 1928)                ✅
+│   │   ├── transparent   iptables REDIRECT (Linux)               ✅
+│   │   └── nfqueue       Netfilter queue (Linux, ядро)           ✅
+│   │
+│   ├── windivert/        Windows kernel bypass
+│   │   └── windows       syscall.NewLazyDLL + пакет split        ✅
 │   │
 │   ├── sysproxy/         Системный прокси
-│   │   └── windows       Реестр HKCU/Internet Settings          ✅
+│   │   └── windows       Реестр HKCU/Internet Settings           ✅
 │   │
 │   └── lists/            Списки доменов
-│       ├── hostlist       Загрузка из файла + wildcard           ✅
-│       └── antifilter     antifilter.download (800K+ доменов)   ✅
+│       ├── hostlist       Загрузка из файла + wildcard            ✅
+│       └── antifilter     antifilter.download (800K+ доменов)    ✅
 │
 ├── Платформы
-│   ├── Linux/Docker      systemd сервис + Docker Compose        ✅
-│   ├── Windows           Windows Service + трей + авто-прокси   ✅
-│   ├── Android           VpnService APK + DoH в TUN             ✅
-│   └── OpenWrt           init.d скрипт                         🔄
+│   ├── Linux/Docker      systemd сервис + Docker Compose         ✅
+│   ├── Windows           WinDivert + служба + трей + авто-прокси ✅
+│   ├── Android           VpnService + UDP relay + per-app + widget ✅
+│   └── OpenWrt           init.d скрипт                          🔄
 │
 └── Интерфейсы
-    ├── web/              Веб-UI + WebSocket + DoH статус        ✅
-    ├── android/          Compose UI (кнопка, лог, статистика)   ✅
-    └── telegram/         Telegram бот управление                🔄
+    ├── web/              Веб-UI + WebSocket + DoH + ECH статус   ✅
+    ├── android/          Compose UI + SplitTunnelCard + Widget   ✅
+    └── telegram/         Telegram бот управление                 🔄
 ```
 
 Обозначения: ✅ готово · 🔄 в плане
@@ -81,23 +88,21 @@ FreeNet Go
 ### Фаза 1: Основа ✅ ЗАВЕРШЕНА (v1.0.5)
 
 - Go модуль, структура пакетов
-- SOCKS5 прокси + прозрачный прокси + nfqueue
+- SOCKS5 прокси + прозрачный прокси + nfqueue (Linux)
 - Стратегии: split, disorder, QUIC, TLS record, fake, combined, auto
 - TLS ClientHello парсер + SNI extraction
 - Hostlist с авто-обновлением
 - Веб UI с большой кнопкой + WebSocket логи в реальном времени
 - Docker Compose + Dockerfile
 - Linux systemd установщик
-- GitHub Actions CI/CD + авто-релиз
-- Страница скачивания в веб-UI
+- GitHub Actions CI/CD + авто-релиз + страница скачивания
 
 ### Фаза 2: Усиление bypass ✅ ЗАВЕРШЕНА (v1.0.5)
 
 - Fake packets через raw sockets (Linux `SOCK_RAW`, TTL=4, bad checksum)
-- TLS record layer splitting (2 TLS записи вместо одной)
-- nfqueue интеграция для Linux
+- TLS record layer splitting
 - Combined стратегия (fake + tlsrec)
-- Windows кросс-компиляция
+- Windows кросс-компиляция (CGO_ENABLED=0)
 
 ### Фаза 3: Android APK ✅ ЗАВЕРШЕНА (v1.0.5)
 
@@ -105,52 +110,71 @@ FreeNet Go
 - gomobile bind → `.aar` библиотека
 - Android Studio проект (Kotlin/Jetpack Compose)
 - VpnService API (без root)
-- TUN packet forwarder (Go + Kotlin fallback)
 - Per-boot автозапуск
 - GitHub Release автопубликация артефактов
 
-### Фаза 4a: Windows GUI ✅ ЗАВЕРШЕНА (v1.1.0)
+### Фаза 4а: Windows GUI ✅ ЗАВЕРШЕНА (v1.1.0)
 
 - Системный трей (`github.com/getlantern/systray`)
-- Иконка в трее вместо чёрной консоли
-- Меню: статус, выбор стратегии, открыть веб-интерфейс, выйти
+- Меню: статус, стратегии, открыть веб UI, выйти
 
-### Фаза 4b: Windows авто-прокси ✅ ЗАВЕРШЕНА (v1.2.0)
+### Фаза 4б: Windows авто-прокси ✅ ЗАВЕРШЕНА (v1.2.0)
 
-- Автоматическая установка системного SOCKS5 прокси в реестр Windows
-- При включении bypass — Chrome/Edge/Firefox работают без настройки
-- При отключении — настройки восстанавливаются
-- `WM_SETTINGCHANGE` broadcast — браузеры реагируют мгновенно
+- Запись SOCKS5 прокси в реестр Windows (HKCU/Internet Settings)
+- `WM_SETTINGCHANGE` broadcast — браузеры реагируют без перезапуска
 
-### Фаза 4c: DNS-over-HTTPS ✅ ЗАВЕРШЕНА (v1.3.0)
+### Фаза 4в: DNS-over-HTTPS ✅ ЗАВЕРШЕНА (v1.3.0)
 
-- DoH клиент RFC 8484 (Cloudflare 1.1.1.1, Google 8.8.8.8, Quad9 9.9.9.9)
-- Локальный UDP резолвер `127.0.0.1:5300` — системные DNS запросы через DoH
-- Android TUN перехват UDP:53 → DoH (без root, без дополнительного порта)
-- Hostlist загрузка через DoH-aware HTTP клиент
-- Статус DoH в веб-интерфейсе
+- DoH-клиент RFC 8484 (Cloudflare/Google/Quad9)
+- Локальный UDP-резолвер `127.0.0.1:5300`
+- Android TUN перехват UDP:53 → DoH
+- Статус в веб UI
 
-### Фаза 5: ECH + качество 🔄 СЛЕДУЮЩАЯ
+### Фаза 5: ECH + Unit Tests ✅ ЗАВЕРШЕНА (v1.4.0)
 
-- ECH (Encrypted Client Hello) — шифрует SNI в TLS 1.3
-- Unit тесты для стратегий bypass
-- Integration тесты с mock DPI сервером
-- Бенчмарки производительности
+- ECH обнаружение (`0xFE0D`) → passthrough
+- HTTPS DNS lookup для ECH config (RFC 9460)
+- `EnableECH()` в DoH HTTP транспорте
+- Статус `🔐 ECH обнаружен: N соед.` в веб UI
+- 35 unit тестов (bypass/dns/logs)
 
-### Фаза 6: Windows WinDivert 🔄
+### Фаза 6: Windows WinDivert ✅ ЗАВЕРШЕНА (v1.5.2)
 
-- WinDivert интеграция (CGO, dll уже есть в репо `nfq2/windows/`)
-- Полный перехват всего трафика на Windows (аналог nfqueue на Linux)
-- Без настройки SOCKS5 — работает для всех приложений автоматически
-- NSIS установщик → `freenet-setup.exe` с GUI
+- `internal/windivert/` — DLL loader без CGO (`syscall.NewLazyDLL`)
+- Перехват исходящего TCP:443 на уровне ядра
+- Применяет split/tlsrec/combined прямо в пакетах
+- ECH passthrough (не трогает уже-зашифрованный SNI)
+- CI: скачивает WinDivert latest → `freenet-windows-bundle.zip`
+- PowerShell installer обновлён: скачивает bundle
+- Трей: `⚡ WinDivert: активен (все приложения)`
 
-### Фаза 7: Android улучшения 🔄
+### Фаза 7: Android улучшения ✅ ЗАВЕРШЕНА (v1.6.0)
 
-- Замена минимального TUN стека на `xjasonlyu/tun2socks/v2` (gVisor-based)
-- IPv6 поддержка
-- UDP/QUIC поддержка через TUN
-- Per-app фильтрация (только выбранные приложения через VPN)
-- F-Droid packaging
+- `mobile/tun_udp.go` — UDP NAT relay (Discord, Steam, игры, QUIC)
+- IPv6 исключён из VPN маршрутов (IPv4-only форвардер)
+- `SplitTunnelConfig.kt` — per-app split tunnel (SharedPreferences)
+- `FreenetVpnService.kt` — `addAllowedApplication()` / `addDisallowedApplication()`
+- `FreeNetWidget.kt` — 2×1 кнопка на рабочем столе
+- `SplitTunnelCard` в Compose UI — список приложений с поиском
+
+---
+
+## Следующие фазы (планируется)
+
+### Фаза 8: Качество и F-Droid 🔄
+
+- F-Droid манифест (`metadata/com.freenet.vpn.yml`)
+- F-Droid build — сборка без gomobile AAR (pure Java fallback)
+- Android integration tests
+- Бенчмарки производительности bypass
+- OpenWrt init.d скрипт
+
+### Фаза 9: Telegram бот 🔄
+
+- `internal/telegram/` — бот через Bot API
+- Команды: `/status`, `/enable`, `/disable`, `/strategy auto`
+- Управление удалённым сервером из телефона
+- Push-уведомления о смене статуса
 
 ---
 
@@ -160,11 +184,15 @@ FreeNet Go
 |-----------|-----------|-------------|
 | Язык | Go 1.26 | Кросс-платформа, один бинарник, gomobile |
 | Android UI | Kotlin/Compose | Нативный, современный Android |
-| Android транспорт | gomobile + VpnService | Без root, официальное Android API |
-| DNS защита | RFC 8484 DoH | Стандарт, HTTPS, работает без root |
+| Android транспорт | gomobile + VpnService | Без root, официальное API |
+| DNS защита | RFC 8484 DoH | Стандарт, HTTPS, без root |
+| ECH | RFC 9601 + RFC 9460 | Новейшая защита SNI (2026) |
+| Windows kernel | WinDivert 2.x (syscall) | Перехват без CGO |
 | Windows трей | getlantern/systray | Нативный трей Win/Lin/Mac |
 | Windows прокси | HKCU Registry | Авто-настройка без admin прав |
+| Android split tunnel | VpnService.Builder | Нативное Android API |
+| Android widget | AppWidgetProvider | Стандарт Android |
 | Конфиг | YAML | Читаемый, стандарт де-факто |
 | Логи | ring buffer + WebSocket | Real-time, нет disk I/O |
-| Списки блокировок | antifilter.download | 800K+ доменов, обновляется ежедневно |
+| Списки | antifilter.download | 800K+ доменов, ежедневно |
 | CI/CD | GitHub Actions | Авто-релиз для всех платформ |

@@ -9,7 +9,7 @@
 5. [Перехват трафика](#5-перехват-трафика)
 6. [SOCKS5 прокси](#6-socks5-прокси)
 7. [Веб-интерфейс](#7-веб-интерфейс)
-8. [Android архитектура](#8-android-архитектура)
+8. [Android архитектура](#8-android-архитектура) (TUN, UDP relay, split tunnel, widget)
 9. [Windows интеграция](#9-windows-интеграция) (трей, системный прокси, WinDivert, служба)
 10. [Конфигурация](#10-конфигурация)
 11. [Сборка и деплой](#11-сборка-и-деплой)
@@ -607,36 +607,49 @@ Go код читает raw IPv4 пакеты из TUN fd:
 
 ## 8. Android архитектура
 
-### Слои
+### Слои (v1.6.0)
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Kotlin UI Layer (Jetpack Compose)                  │
-│  MainActivity.kt + VpnViewModel.kt                  │
-└─────────────────────┬───────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Kotlin UI Layer (Jetpack Compose)                          │
+│  MainActivity.kt + VpnViewModel.kt                          │
+│  - BigToggleButton, StrategyPicker, StatsCard, LogCard      │
+│  - SplitTunnelCard (per-app selector + поиск)               │
+│  + FreeNetWidget.kt (AppWidget 2×1 на рабочем столе)       │
+└─────────────────────┬───────────────────────────────────────┘
                       │ ViewModel → Service
-┌─────────────────────▼───────────────────────────────┐
-│  Android Service Layer                              │
-│  FreenetVpnService.kt (VpnService)                  │
-│  - Создаёт TUN interface (10.89.0.1/24)             │
-│  - Управляет lifecycle VPN                          │
-│  - Уведомление в statusbar                          │
-└─────────────────────┬───────────────────────────────┘
+┌─────────────────────▼───────────────────────────────────────┐
+│  Android Service Layer                                      │
+│  FreenetVpnService.kt (VpnService)                          │
+│  - TUN interface: только IPv4 (без ::/0)                    │
+│  - Split tunnel: addAllowedApplication/addDisallowedApp     │
+│  - SplitTunnelConfig.kt (SharedPreferences persist)         │
+│  - Уведомление + ACTION_START/STOP broadcasts               │
+└─────────────────────┬───────────────────────────────────────┘
                       │ tunFd + gomobile API
-┌─────────────────────▼───────────────────────────────┐
-│  Go Core Layer (gomobile AAR)                       │
-│  mobile/engine.go                                   │
-│  - SOCKS5 bypass прокси (все стратегии)             │
-│  - FreenetEngine.StartVPN(tunFd, port, protector)   │
-└─────────────────────┬───────────────────────────────┘
+┌─────────────────────▼───────────────────────────────────────┐
+│  Go Core Layer (gomobile AAR)                               │
+│  mobile/engine.go                                           │
+│  - SOCKS5 bypass прокси (все стратегии)                     │
+│  - FreenetEngine.StartVPN(tunFd, port, protector)           │
+└─────────────────────┬───────────────────────────────────────┘
                       │ raw IPv4 packets
-┌─────────────────────▼───────────────────────────────┐
-│  TUN Packet Forwarder + DNS Interceptor             │
-│  mobile/tun.go                                      │
-│  - TCP (proto=6): SOCKS5 bypass                     │
-│  - UDP:53 (proto=17): DoH inline resolution         │
-│  - Корректные IPv4/TCP/UDP checksums                │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────▼───────────────────────────────────────┐
+│  TUN Packet Forwarder                                       │
+│  mobile/tun.go — диспетчер протоколов                      │
+│  ├── TCP (proto=6)  → SOCKS5 bypass engine                  │
+│  ├── UDP:53         → DoH inline resolution                 │
+│  └── UDP (other)    → mobile/tun_udp.go (UDP NAT relay)     │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ protected UDP sockets
+┌─────────────────────▼───────────────────────────────────────┐
+│  UDP NAT Relay                                              │
+│  mobile/tun_udp.go                                          │
+│  - Таблица udpSession (srcIP:port → dstIP:port → socket)    │
+│  - Protect socket: исключает из VPN routing                 │
+│  - Sweeper: закрывает idle сессии (>30 сек)                 │
+│  Покрывает: Discord (UDP), Steam, игры, QUIC               │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### gomobile binding
@@ -649,7 +662,7 @@ engine.start(1080)                    // запуск SOCKS5 прокси
 engine.setStrategy("auto")           // стратегия bypass
 engine.setBypassEnabled(true)        // вкл/выкл bypass
 engine.isRunning()                   // статус
-engine.getVersion()                  // "1.3.0"
+engine.getVersion()                  // "1.6.0"
 engine.getStats()                    // JSON статистика
 engine.getRecentLogs(50)             // последние 50 строк лога
 engine.startVPN(tunFd, 1080, prot)   // блокирующий вызов: запуск TUN loop
@@ -666,8 +679,67 @@ class GoSocketProtector(private val svc: VpnService) : Mobile.SocketProtector {
 }
 ```
 
-Каждый исходящий сокет (к реальному серверу через SOCKS5) помечается через `protect(fd)`
-до `connect()`. ОС исключает эти сокеты из VPN routing и отправляет трафик напрямую.
+Каждый исходящий сокет (к реальному серверу через SOCKS5 или UDP relay) помечается
+через `protect(fd)` до `connect()`. ОС исключает эти сокеты из VPN routing.
+
+### UDP NAT Relay (`mobile/tun_udp.go`)
+
+Для каждого UDP flow (srcIP:srcPort → dstIP:dstPort) создаётся локальный `UDPConn`:
+
+```
+Приложение → TUN (UDP) → handleUDPRelay() → protected UDPConn → Internet
+Internet → protected UDPConn → relayUDPResponses() → inject UDP в TUN → Приложение
+```
+
+**Жизненный цикл сессии:**
+1. `handleUDPRelay()` — LoadOrStore в `udpConns sync.Map`
+2. Новая сессия: `net.ListenPacket("udp4", "0.0.0.0:0")` + `protect(fd)`
+3. `relayUDPResponses()` горутина: ReadFrom → buildUDPPacket → writePkt
+4. ReadDeadline = 30 сек; при timeout — сессия закрывается
+5. `sweepIdleUDPSessions()` — тикер каждые 15 сек, чистит просроченные
+
+**Что работает после v1.6.0:**
+- Discord (UDP голос/видео)
+- Steam (matchmaking, game traffic)
+- Все QUIC/HTTP3 соединения на нестандартных портах
+- Видеозвонки (Telegram VoIP, WhatsApp, Zoom)
+
+### Per-app split tunnel (`SplitTunnelConfig.kt`)
+
+```kotlin
+// Три режима
+SplitTunnelConfig.MODE_DISABLED   // все приложения через VPN
+SplitTunnelConfig.MODE_ALLOWLIST  // только выбранные через VPN
+SplitTunnelConfig.MODE_BLOCKLIST  // все, кроме выбранных
+
+// Применение в VpnService.Builder
+when (config.mode) {
+    MODE_ALLOWLIST -> apps.forEach { builder.addAllowedApplication(it) }
+    MODE_BLOCKLIST -> apps.forEach { builder.addDisallowedApplication(it) }
+}
+```
+
+Конфиг сериализуется в SharedPreferences (`freenet_split_tunnel`):
+- `mode` → строка
+- `apps_json` → JSON массив package name
+
+### Home screen widget (`FreeNetWidget.kt`)
+
+`AppWidgetProvider` с layout `res/layout/widget_toggle.xml` (2×1 ячейки):
+
+```
+┌──────────────────────┐
+│  FreeNet ВКЛ   (🟢) │  ← когда VPN активен
+└──────────────────────┘
+┌──────────────────────┐
+│  FreeNet ВЫКЛ  (🔴) │  ← когда VPN остановлен
+└──────────────────────┘
+```
+
+Обновление виджета:
+- `FreenetVpnService` рассылает `ACTION_START` / `ACTION_STOP`
+- `FreeNetWidget.onReceive()` вызывает `update(ctx)` → `updateWidget()`
+- `RemoteViews.setInt(id, "setBackgroundColor", color)` меняет цвет
 
 ---
 
