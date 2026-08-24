@@ -5,7 +5,7 @@
 // connects tun2socks to the SOCKS5 port exposed here, and all device traffic
 // is transparently routed through the bypass engine.
 //
-// Usage from Kotlin after "gomobile bind -javapkg com.freenet.bypass ./internal/mobile":
+// Usage from Kotlin after "gomobile bind -javapkg com.freenet.bypass ./mobile":
 //
 //	val engine = Mobile.newFreenetEngine()
 //	engine.start(1080)              // SOCKS5 on 127.0.0.1:1080

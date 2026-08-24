@@ -22,7 +22,7 @@ set -euo pipefail
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 JAVA_PKG="com.freenet.bypass"   # Java/Kotlin package for generated bindings
-GO_PKG="./internal/mobile"     # Go package to bind
+GO_PKG="./mobile"              # Go package to bind
 ANDROID_MIN_API=26              # Android 8.0 minimum
 OUT_DIR="$(pwd)/android/app/libs"
 OUT_AAR="$OUT_DIR/mobile.aar"

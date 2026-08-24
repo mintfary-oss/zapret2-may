@@ -109,7 +109,7 @@ jobs:
             -androidapi 26 \
             -javapkg com.freenet.bypass \
             -o dist/mobile.aar \
-            ./internal/mobile
+            ./mobile
 
       - name: Build Android APK
         env:
