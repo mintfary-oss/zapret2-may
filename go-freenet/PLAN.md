@@ -3,8 +3,7 @@
 ## Цель
 
 Создать лучший кросс-платформенный инструмент обхода DPI для России (РКН/ТСПУ),
-написанный на Go. Конкурировать с GoodbyeDPI, ByeDPI, Zapret и превзойти их
-по совокупности возможностей.
+написанный на Go. Превзойти конкурентов по совокупности возможностей.
 
 ---
 
@@ -13,56 +12,55 @@
 | Функция | GoodbyeDPI | ByeDPI | Zapret | **FreeNet Go** |
 |---------|------------|--------|--------|----------------|
 | Linux | ❌ | ❌ | ✅ | ✅ |
-| Windows | ✅ | ❌ | частично | ✅ (план) |
-| Android | ❌ | ✅ | частично | ✅ (план) |
+| Windows | ✅ | ❌ | частично | ✅ |
+| Android | ❌ | ✅ | частично | ✅ |
 | QUIC/HTTP3 | ❌ | ❌ | ✅ | ✅ |
-| ECH | ❌ | ❌ | ❌ | ✅ (план) |
-| Auto-detect | ❌ | ❌ | ❌ | ✅ |
+| ECH | ❌ | ❌ | ❌ | 🔄 план |
+| Auto-detect ISP | ❌ | ❌ | ❌ | ✅ |
 | Веб UI | ❌ | ❌ | ❌ | ✅ |
 | Docker | ❌ | ❌ | ❌ | ✅ |
+| GitHub Release | ❌ | ❌ | ❌ | ✅ |
 | Один бинарник | ✅ | ✅ | ❌ | ✅ |
 | Язык | C | C | C+Lua | **Go** |
 
 ---
 
-## Архитектура (полная)
+## Архитектура
 
 ```
 FreeNet Go
 │
-├── Ядро (Go) ─────────────────────────────────────────────────────────────────
+├── Ядро (Go)
 │   ├── bypass/           Стратегии обхода DPI
-│   │   ├── split         TCP фрагментация на позиции SNI ✅
-│   │   ├── disorder      Disorder атака (best-effort) ✅
-│   │   ├── fake          Фейковые пакеты (нужен raw socket) 🔄
-│   │   ├── quic          QUIC Initial фрагментация ✅
-│   │   ├── ech           Encrypted Client Hello (TLS 1.3) 🔄
-│   │   ├── tls_record    TLS record splitting 🔄
-│   │   └── autodetect    Авто-выбор стратегии ✅
+│   │   ├── split         TCP фрагментация на позиции SNI        ✅
+│   │   ├── disorder      Disorder атака (best-effort)           ✅
+│   │   ├── tlsrec        TLS record layer splitting             ✅
+│   │   ├── fake          Фейковые пакеты (raw socket)           ✅ Linux
+│   │   ├── combined      fake + tlsrec                          ✅
+│   │   ├── quic          QUIC Initial фрагментация              ✅
+│   │   ├── autodetect    Авто-выбор стратегии под ISP           ✅
+│   │   └── ech           Encrypted Client Hello (TLS 1.3)      🔄
 │   │
 │   ├── proxy/            Перехват трафика
-│   │   ├── socks5        SOCKS5 прокси ✅
-│   │   ├── transparent   iptables REDIRECT (Linux) ✅
-│   │   ├── tun           TUN интерфейс (Android/Linux) 🔄
-│   │   └── windivert     WinDivert (Windows) 🔄
+│   │   ├── socks5        SOCKS5 прокси (RFC 1928)               ✅
+│   │   ├── transparent   iptables REDIRECT (Linux)              ✅
+│   │   └── nfqueue       Netfilter queue (Linux, ядро)          ✅
 │   │
 │   └── lists/            Списки доменов
-│       ├── hostlist       Загрузка из файла ✅
-│       ├── antizapret     antizapret.prostovpn.com 🔄
-│       └── antifilter     antifilter.download ✅
+│       ├── hostlist       Загрузка из файла + wildcard           ✅
+│       └── antifilter     antifilter.download (800K+ доменов)   ✅
 │
-├── Интерфейсы ─────────────────────────────────────────────────────────────────
-│   ├── web/              Веб-UI (Go HTTP) ✅
-│   ├── tray/             Системный трей (Windows/Linux) 🔄
-│   ├── android/          Android APK (gomobile) 🔄
-│   └── telegram/         Telegram бот управление 🔄
+├── Платформы
+│   ├── Linux/Docker      systemd сервис + Docker Compose        ✅
+│   ├── Windows           Windows Service + exe                  ✅
+│   ├── Android           VpnService APK (без root)              ✅
+│   └── OpenWrt           init.d скрипт                         🔄
 │
-└── Развёртывание ──────────────────────────────────────────────────────────────
-    ├── docker-compose    ✅
-    ├── systemd           ✅
-    ├── windows installer NSIS/Inno Setup 🔄
-    ├── android APK       gomobile 🔄
-    └── openwrt           init.d скрипт 🔄
+└── Интерфейсы
+    ├── web/              Веб-UI + WebSocket логи                ✅
+    ├── android/          Compose UI (кнопка, лог, статистика)   ✅
+    ├── tray/             Системный трей (Windows/Linux)         🔄
+    └── telegram/         Telegram бот управление                🔄
 ```
 
 Обозначения: ✅ готово · 🔄 в плане
@@ -71,44 +69,57 @@ FreeNet Go
 
 ## Фазы разработки
 
-### Фаза 1: Основа (ВЫПОЛНЕНО) ✅
+### Фаза 1: Основа ✅ ЗАВЕРШЕНА
+
 - Go модуль, структура пакетов
-- SOCKS5 прокси + прозрачный прокси
-- Стратегии: split, disorder, QUIC
-- TLS ClientHello парсер
+- SOCKS5 прокси + прозрачный прокси + nfqueue
+- Стратегии: split, disorder, QUIC, TLS record, fake, combined, auto
+- TLS ClientHello парсер + SNI extraction
 - Hostlist с авто-обновлением
-- Веб UI с большой кнопкой + WebSocket логи
-- Docker Compose
+- Веб UI с большой кнопкой + WebSocket логи в реальном времени
+- Docker Compose + Dockerfile
 - Linux systemd установщик
 
-### Фаза 2: Усиление bypass (следующая) 🔄
-- Fake packets через raw sockets (Linux `SOCK_RAW`)
-- TLS record layer splitting (разбивка на уровне TLS record)
-- ECH (Encrypted Client Hello) — новейшая техника
-- nfqueue интеграция (как в zapret2) для Linux
-- JA3/JA4 fingerprint spoofing
+### Фаза 2: Усиление bypass ✅ ЗАВЕРШЕНА
 
-### Фаза 3: Windows 🔄
-- Интеграция WinDivert (C библиотека уже есть в репо)
-- Go + CGO обёртка для WinDivert
-- Системный трей (fyne.io или systray)
-- NSIS установщик → `freenet-setup.exe`
-- Автозапуск через Windows Service
+- Fake packets через raw sockets (Linux `SOCK_RAW`, TTL=4, bad checksum)
+- TLS record layer splitting (2 TLS записи вместо одной)
+- nfqueue интеграция для Linux
+- Combined стратегия (fake + tlsrec)
+- Windows кросс-компиляция
+- GitHub Actions CI/CD
 
-### Фаза 4: Android 🔄
+### Фаза 3: Android APK ✅ ЗАВЕРШЕНА
+
+- `mobile/` пакет — gomobile-bindable Go API
 - gomobile bind → `.aar` библиотека
-- Android Studio проект (Kotlin/Compose)
+- Android Studio проект (Kotlin/Jetpack Compose)
 - VpnService API (без root)
-- gVisor netstack + tun2socks
-- Per-app фильтрация
-- Публикация APK в релизы GitHub
+- TUN packet forwarder (Go + Kotlin fallback)
+- Per-boot автозапуск
+- GitHub Release автопубликация артефактов
 
-### Фаза 5: Качество 🔄
-- Unit тесты для bypass стратегий
-- Integration тесты с mock DPI
-- CI/CD (GitHub Actions: build + test)
-- Кросс-компиляция: linux/amd64, linux/arm64, windows/amd64, android/arm64
-- Автоматические релизы с артефактами
+### Фаза 4: Windows GUI 🔄 СЛЕДУЮЩАЯ
+
+- Системный трей (`github.com/getlantern/systray`)
+- WinDivert интеграция (CGO, dll уже есть в репо `nfq2/windows/`)
+- NSIS установщик → `freenet-setup.exe`
+- Автозапуск через Windows Service (уже есть базовая реализация)
+
+### Фаза 5: ECH + качество 🔄
+
+- ECH (Encrypted Client Hello) — шифрует SNI в TLS 1.3
+- Unit тесты для стратегий bypass
+- Integration тесты с mock DPI сервером
+- Бенчмарки производительности
+
+### Фаза 6: Android улучшения 🔄
+
+- Замена минимального TUN стека на `xjasonlyu/tun2socks/v2` (gVisor-based)
+- IPv6 поддержка
+- UDP/QUIC поддержка через TUN
+- Per-app фильтрация (только выбранные приложения через VPN)
+- F-Droid packaging
 
 ---
 
@@ -116,11 +127,11 @@ FreeNet Go
 
 | Компонент | Технология | Обоснование |
 |-----------|-----------|-------------|
-| Язык | Go 1.22+ | Кросс-платформа, один бинарник, gomobile |
-| Android UI | Kotlin/Compose | Нативный Android |
-| Android transport | gomobile + VpnService | Без root |
-| Windows transport | WinDivert (CGO) | Уже в репо, проверен |
-| Windows UI | fyne.io или systray | Чистый Go |
-| Конфиг | YAML | Читаемый, стандарт |
-| Логи | ring buffer + WebSocket | Real-time без накладных расходов |
-| Списки | antifilter.download | 800K+ доменов, обновляется ежедневно |
+| Язык | Go 1.26 | Кросс-платформа, один бинарник, gomobile |
+| Android UI | Kotlin/Compose | Нативный, современный Android |
+| Android транспорт | gomobile + VpnService | Без root, официальное Android API |
+| Windows транспорт | WinDivert (CGO) | Уже в репо, проверен |
+| Конфиг | YAML | Читаемый, стандарт де-факто |
+| Логи | ring buffer + WebSocket | Real-time, нет disk I/O |
+| Списки блокировок | antifilter.download | 800K+ доменов, обновляется ежедневно |
+| CI/CD | GitHub Actions | Авто-релиз для всех платформ |

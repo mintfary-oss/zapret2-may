@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Статус: v0.3.0 — Phase 3 (Android) завершена
+## Текущая версия: v1.0.5 — все Phase 1–3 завершены, релиз опубликован
 
 ---
 
@@ -8,170 +8,159 @@
 
 ```
 go-freenet/
-├── cmd/freenet/main.go                   # точка входа, CLI флаги
+├── cmd/freenet/
+│   ├── main.go                       # точка входа, CLI флаги
+│   ├── service_stub.go               # заглушка для не-Windows
+│   └── service_windows.go            # Windows Service (Install/Uninstall)
 ├── internal/
 │   ├── bypass/
-│   │   ├── engine.go                     # выбор и запуск стратегии
-│   │   ├── split.go                      # TCP фрагментация (split)
-│   │   ├── disorder.go                   # disorder атака
-│   │   ├── tlsrec.go                     # TLS record layer splitting
-│   │   ├── fake.go                       # fake packets — интерфейс
-│   │   ├── fake_linux.go                 # fake packets — raw socket (Linux)
-│   │   ├── fake_stub.go                  # fake packets — заглушка (не-Linux)
-│   │   ├── quic.go                       # QUIC/HTTP3 bypass
-│   │   ├── tls.go                        # парсер TLS ClientHello / SNI
-│   │   ├── autodetect.go                 # авто-подбор стратегии
-│   │   └── hostlist.go                   # фильтрация по доменам
-│   ├── config/config.go                  # YAML конфигурация
-│   ├── logs/ring.go                      # кольцевой буфер логов
-│   ├── mobile/                           # ✨ NEW — gomobile Android binding
-│   │   ├── engine.go                     # FreenetEngine API (SOCKS5 + VPN)
-│   │   └── tun.go                        # IPv4/TCP TUN packet forwarder
+│   │   ├── engine.go                 # выбор и запуск стратегии обхода DPI
+│   │   ├── split.go                  # TCP фрагментация на позиции SNI
+│   │   ├── disorder.go               # disorder атака (head/tail + пауза)
+│   │   ├── tlsrec.go                 # TLS record layer splitting
+│   │   ├── fake.go                   # fake packets — интерфейс
+│   │   ├── fake_linux.go             # fake packets — raw socket (Linux)
+│   │   ├── fake_stub.go              # fake packets — заглушка (не-Linux)
+│   │   ├── quic.go                   # QUIC/HTTP3 bypass (UDP 443)
+│   │   ├── tls.go                    # парсер TLS ClientHello / SNI offset
+│   │   ├── autodetect.go             # авто-подбор стратегии под провайдера
+│   │   └── hostlist.go               # фильтрация по доменам (antizapret)
+│   ├── config/
+│   │   └── config.go                 # YAML конфигурация
+│   ├── logs/
+│   │   └── ring.go                   # кольцевой буфер логов + WebSocket pub
 │   ├── proxy/
-│   │   ├── server.go                     # управление сервером
-│   │   ├── socks5.go                     # SOCKS5 прокси (RFC 1928)
-│   │   ├── transparent.go                # прозрачный прокси (Linux)
-│   │   ├── transparent_stub.go           # заглушка (не-Linux)
-│   │   ├── nfqueue.go                    # netfilter queue (Linux)
-│   │   ├── nfqueue_stub.go               # заглушка (не-Linux)
-│   │   └── stats.go                      # статистика соединений
-│   ├── types/types.go                    # общие типы данных
-│   └── web/ui.go                         # веб-интерфейс + WebSocket
-├── android/                              # ✨ NEW — Android Studio проект
-│   ├── app/
-│   │   ├── src/main/
-│   │   │   ├── AndroidManifest.xml       # VpnService permissions
-│   │   │   ├── java/com/freenet/vpn/
-│   │   │   │   ├── MainActivity.kt       # Compose UI (big button)
-│   │   │   │   ├── FreenetVpnService.kt  # VpnService + TUN lifecycle
-│   │   │   │   ├── PacketForwarder.kt    # Kotlin fallback tun2socks
-│   │   │   │   ├── VpnViewModel.kt       # state management (MVVM)
-│   │   │   │   └── BootReceiver.kt       # auto-start on boot
-│   │   │   └── res/                      # strings, drawables, launcher
-│   │   ├── build.gradle.kts              # Gradle app config
-│   │   └── proguard-rules.pro
+│   │   ├── server.go                 # управление сервером, lifecycle
+│   │   ├── socks5.go                 # SOCKS5 прокси (RFC 1928), полный
+│   │   ├── transparent.go            # прозрачный прокси, iptables REDIRECT
+│   │   ├── transparent_stub.go       # заглушка (Windows/macOS)
+│   │   ├── nfqueue.go                # netfilter queue (Linux, ядро)
+│   │   ├── nfqueue_stub.go           # заглушка (не-Linux)
+│   │   └── stats.go                  # статистика соединений (атомарные)
+│   ├── types/
+│   │   └── types.go                  # общие структуры (StatsSnapshot, etc.)
+│   └── web/
+│       └── ui.go                     # веб-UI + WebSocket логи в реальном времени
+├── mobile/                           # gomobile-bindable API (публичный пакет)
+│   ├── engine.go                     # FreenetEngine — SOCKS5 + VPN API
+│   └── tun.go                        # IPv4/TCP TUN packet forwarder
+├── android/                          # Android Studio проект
+│   ├── app/src/main/
+│   │   ├── AndroidManifest.xml       # разрешения VpnService
+│   │   └── java/com/freenet/vpn/
+│   │       ├── MainActivity.kt       # Compose UI: кнопка, стратегия, лог
+│   │       ├── FreenetVpnService.kt  # VpnService + TUN lifecycle
+│   │       ├── PacketForwarder.kt    # Kotlin fallback tun2socks
+│   │       ├── VpnViewModel.kt       # MVVM state management
+│   │       └── BootReceiver.kt       # автозапуск при загрузке
 │   ├── gradle/
-│   │   ├── libs.versions.toml            # version catalog
+│   │   ├── libs.versions.toml        # version catalog
 │   │   └── wrapper/gradle-wrapper.properties
+│   ├── gradle.properties             # android.useAndroidX=true
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── init.d/systemd/freenet.service        # systemd unit
+├── init.d/systemd/
+│   └── freenet.service               # systemd unit
 ├── scripts/
-│   ├── install.sh                        # установщик Linux
-│   ├── setup-transparent.sh              # настройка iptables
-│   ├── teardown-transparent.sh           # откат iptables
-│   ├── build-android.sh                  # ✨ NEW — собирает gomobile AAR
-│   └── build-release-apk.sh             # ✨ NEW — полный pipeline APK
-├── .github/workflows/build.yml           # CI/CD (+ Android AAR job) ✨ NEW
-├── Dockerfile                            # multi-stage build
-├── docker-compose.yml                    # одна команда запуска
-├── docker-entrypoint.sh                  # entrypoint с iptables
-└── go.mod / go.sum                       # зависимости
-```
-
----
-
-## Android APK — Phase 3
-
-### Архитектура
-
-```
-Android APK
-├── FreenetVpnService (Kotlin)
-│   ├── VpnService.Builder → TUN interface (10.89.0.2/24)
-│   ├── Go FreenetEngine (gomobile AAR)
-│   │   ├── SOCKS5 прокси → 127.0.0.1:1080
-│   │   └── ForwardTUN (IPv4/TCP forwarder)
-│   └── Fallback: PacketForwarder.kt (без AAR)
-├── MainActivity (Compose)
-│   ├── Большая кнопка ВКЛЮЧИТЬ/ВЫКЛЮЧИТЬ
-│   ├── Выбор стратегии (auto/split/tlsrec/combined/fake/none)
-│   ├── Статистика соединений
-│   └── Лог в реальном времени
-└── BootReceiver — автозапуск при загрузке
-```
-
-### Как собрать
-
-```bash
-# 1. Требования: Go 1.21+, Android NDK 26+, Android Studio
-export ANDROID_NDK_HOME=$HOME/Android/Sdk/ndk/26.3.11579264
-
-# 2. Собрать Go AAR + Android APK одной командой
-cd go-freenet
-bash scripts/build-release-apk.sh
-
-# Только AAR (без Android Studio)
-bash scripts/build-android.sh
-```
-
-### gomobile API
-
-```kotlin
-// Инициализация (Kotlin, после сборки AAR)
-val engine = Mobile.newFreenetEngine()
-
-// Запуск SOCKS5 прокси
-engine.start(1080)
-
-// Запуск полного VPN режима (SOCKS5 + TUN форвардер)
-engine.startVPN(tunFd, 1080, protector)
-
-// Управление стратегией
-engine.setStrategy("auto")  // auto / split / tlsrec / combined / none
-
-// Статистика (JSON)
-engine.getStats()  // {"active":2,"total":47,"bytes_in":102400,...}
-
-// Остановка
-engine.stop()
+│   ├── install.sh                    # установщик Linux (systemd)
+│   ├── install-windows.ps1           # PowerShell one-liner
+│   ├── setup-transparent.sh          # настройка iptables REDIRECT
+│   ├── teardown-transparent.sh       # откат iptables
+│   ├── build-android.sh              # сборка gomobile AAR
+│   └── build-release-apk.sh          # полный pipeline: AAR → APK
+├── .github/workflows/
+│   └── freenet.yml                   # CI/CD: build + release
+├── Dockerfile                        # multi-stage, финальный образ ~15 MB
+├── docker-compose.yml                # одна команда запуска
+├── docker-entrypoint.sh              # entrypoint с настройкой iptables
+├── go.mod / go.sum                   # зависимости
+├── CHAT.md                           # переписка с Neo
+├── DONE.md                           # этот файл
+├── ERRORS.md                         # журнал ошибок
+├── PLAN.md                           # план проекта
+├── TODO.md                           # задачи
+└── TECHNICAL.md                      # техническая документация
 ```
 
 ---
 
 ## Реализованные стратегии обхода DPI
 
-| Стратегия | Описание | Требования | Эффективность |
+| Стратегия | Описание | Привилегии | Эффективность |
 |-----------|----------|------------|---------------|
-| **split** | TCP фрагментация ClientHello на позиции SNI | нет | Средняя |
-| **disorder** | Перестановка сегментов head/tail | нет | Средняя |
-| **tlsrec** | TLS record layer splitting (2 TLS записи) | нет | Высокая |
-| **fake** | Decoy пакет (TTL или bad checksum) + split | CAP_NET_RAW | Высокая |
-| **combined** | fake + tlsrec — максимальный эффект | CAP_NET_RAW | Максимальная |
-| **quic** | QUIC Initial фрагментация (UDP 443) | нет | Средняя |
-| **auto** | Авто-тест всех стратегий, выбор лучшей | — | Адаптивная |
-| **none** | Без обхода (для отладки) | — | — |
+| `split` | TCP фрагментация ClientHello на позиции SNI | нет | Средняя |
+| `disorder` | Перестановка сегментов head/tail с паузой | нет | Средняя |
+| `tlsrec` | TLS record layer splitting (2 TLS записи) | нет | Высокая |
+| `fake` | Decoy пакет (TTL=4 или bad checksum) + split | `CAP_NET_RAW` | Высокая |
+| `combined` | fake + tlsrec одновременно | `CAP_NET_RAW` | Максимальная |
+| `quic` | QUIC Initial datagram фрагментация (UDP 443) | нет | Средняя |
+| `auto` | Авто-тест всех стратегий, выбор лучшей | — | Адаптивная |
+| `none` | Без обхода (для отладки) | — | — |
 
 ---
 
-## CI/CD — GitHub Actions
+## Платформы и артефакты
 
-Автоматическая сборка при каждом push в `master`, `main`, `neo/**`:
+| Платформа | Файл | Способ установки |
+|-----------|------|-----------------|
+| Android | `freenet-android.apk` | Скачать → установить APK |
+| Windows | `freenet-windows-amd64.exe` | `freenet.exe -install` (служба) |
+| Windows (авто) | `install-windows.ps1` | PowerShell one-liner |
+| Linux x86-64 | `freenet-linux-amd64` | бинарник или installer |
+| Linux ARM64 | `freenet-linux-arm64` | бинарник или installer |
+| Linux ARMv7 | `freenet-linux-armv7` | Raspberry Pi / роутеры |
+| Linux bundle | `freenet-linux-amd64-installer.tar.gz` | tar + `sudo bash install.sh` |
+| Linux (авто) | `install.sh` | `curl … \| sudo bash` |
+| Docker | — | `docker compose up -d` |
+| Android AAR | `mobile.aar` | для разработчиков |
 
-| Платформа | Артефакт |
-|-----------|---------|
-| linux/amd64 | `freenet-linux-amd64` |
-| linux/arm64 | `freenet-linux-arm64` |
-| linux/armv7 | `freenet-linux-armv7` |
-| windows/amd64 | `freenet-windows-amd64.exe` |
-| **Android AAR** | `mobile.aar` ✨ NEW |
-| **Android APK** | `freenet-debug.apk` ✨ NEW |
+---
+
+## GitHub Actions CI/CD
+
+Триггеры:
+- **Push в master/main/neo/\*\*** — сборка без релиза
+- **Tag `freenet-v*.*.*`** — сборка + создание GitHub Release с артефактами
+- **Pull Request** — сборка для проверки
+
+Jobs:
+- `Lint` — `go vet` + `gofmt`
+- `Build` (matrix: linux/amd64, arm64, armv7, windows/amd64) — кросс-компиляция
+- `Android APK` — gomobile AAR + Gradle APK
+- `Package Linux installer` — installer.tar.gz
+- `Create GitHub Release` — только при tag-пуше
 
 ---
 
 ## Как запустить
 
 ```bash
-# Docker (рекомендуется, одна команда)
+# Docker (рекомендуется)
 cd go-freenet && docker compose up -d
-# → http://localhost:8080  (веб UI)
-# → 127.0.0.1:1080        (SOCKS5)
+# → http://localhost:8080  (веб UI с большой кнопкой)
+# → 127.0.0.1:1080        (SOCKS5 прокси)
 
-# Напрямую (Linux/Windows)
-go build -o freenet ./cmd/freenet
-./freenet -web :8080
+# Linux напрямую
+go build -o freenet ./cmd/freenet && ./freenet -web :8080
 
-# Android APK
+# Linux как сервис
+sudo bash scripts/install.sh
+
+# Windows как сервис
+freenet-windows-amd64.exe -install
+
+# Android APK (при наличии NDK)
 bash scripts/build-release-apk.sh
-# → android/app/build/outputs/apk/debug/app-debug.apk
 ```
+
+---
+
+## Зависимости
+
+| Пакет | Версия | Назначение |
+|-------|--------|-----------|
+| `github.com/gorilla/websocket` | v1.5.3 | WebSocket для логов |
+| `github.com/florianl/go-nfqueue/v2` | v2.1.0 | Netfilter queue (Linux) |
+| `golang.org/x/sys` | v0.47.0 | Системные вызовы (unix/windows) |
+| `golang.org/x/mobile` | v0.0.0-20260821 | gomobile для Android |
+| `gopkg.in/yaml.v3` | v3.0.1 | YAML конфигурация |
