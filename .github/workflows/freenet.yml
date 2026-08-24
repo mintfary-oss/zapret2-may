@@ -230,6 +230,6 @@ jobs:
             | 🐳 Android AAR | `mobile.aar` | Для разработчиков |
 
           generate_release_notes: true
-          files: dist/*
+          files: go-freenet/dist/*
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
