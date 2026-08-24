@@ -18,9 +18,19 @@ import (
 // Hostlist stores a set of domain names and answers membership queries.
 // All methods are safe for concurrent use.
 type Hostlist struct {
-	mu      sync.RWMutex
-	domains map[string]struct{}
-	enabled bool
+	mu         sync.RWMutex
+	domains    map[string]struct{}
+	enabled    bool
+	httpClient *http.Client // optional; nil = use default
+}
+
+// SetHTTPClient replaces the HTTP client used by DownloadAndSave.
+// Pass a DoH-aware client to protect list downloads from DNS poisoning.
+// Must be called before DownloadAndSave to take effect.
+func (h *Hostlist) SetHTTPClient(c *http.Client) {
+	h.mu.Lock()
+	h.httpClient = c
+	h.mu.Unlock()
 }
 
 // NewHostlist returns an empty, disabled Hostlist.
@@ -40,7 +50,8 @@ func (h *Hostlist) LoadFile(path string) error {
 }
 
 // DownloadAndSave fetches the domain list from url, saves it to path and
-// loads it into memory.
+// loads it into memory.  If SetHTTPClient has been called the provided client
+// is used; otherwise a default client with a 30-second timeout is created.
 func (h *Hostlist) DownloadAndSave(ctx context.Context, url, path string) error {
 	log.Printf("hostlist: downloading %s", url)
 
@@ -49,7 +60,12 @@ func (h *Hostlist) DownloadAndSave(ctx context.Context, url, path string) error 
 		return err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	h.mu.RLock()
+	client := h.httpClient
+	h.mu.RUnlock()
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

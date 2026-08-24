@@ -2,16 +2,20 @@
 //
 // ForwardTUN reads raw IP packets from the TUN file descriptor created by
 // Android's VpnService, intercepts TCP SYN packets, and transparently proxies
-// each connection through the local SOCKS5 bypass engine.  The userspace TCP
-// state machine is intentionally minimal: it handles the common case (SYN →
-// SYN-ACK → data exchange → FIN) without implementing IP fragmentation,
-// TCP options negotiation, or SACK.
+// each connection through the local SOCKS5 bypass engine.  UDP packets
+// destined for port 53 (DNS) are intercepted and resolved via DNS-over-HTTPS
+// so that ISP-level DNS poisoning cannot block access to filtered resources.
 //
-// Production note: for higher throughput consider replacing this implementation
-// with github.com/xjasonlyu/tun2socks/v2 (gVisor-based, handles edge cases).
+// The userspace TCP state machine is intentionally minimal: it handles the
+// common case (SYN → SYN-ACK → data exchange → FIN) without implementing IP
+// fragmentation, TCP options negotiation, or SACK.
+//
+// Production note: for higher throughput consider replacing the TCP part of
+// this implementation with github.com/xjasonlyu/tun2socks/v2 (gVisor-based).
 package mobile
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -22,6 +26,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/mintfary-oss/freenet/internal/dns"
 )
 
 // SocketProtector is implemented by the Android VpnService (via gomobile
@@ -44,6 +50,7 @@ type tunForwarder struct {
 	tun       *os.File
 	socksAddr string
 	protector SocketProtector
+	dohClient *dns.Client // nil = DoH DNS intercept disabled
 
 	conns  sync.Map // key: connKey → *tunConn
 	closed atomic.Bool
@@ -79,7 +86,8 @@ type tunConn struct {
 	closed bool
 }
 
-// ForwardTUN starts the TUN packet-forwarding loop.
+// ForwardTUN starts the TUN packet-forwarding loop with DoH DNS protection
+// enabled by default (uses Cloudflare / Google / Quad9).
 //
 // Parameters:
 //   - tunFd:     file descriptor of the TUN interface (from VpnService.Builder.establish()).
@@ -88,15 +96,32 @@ type tunConn struct {
 //
 // Blocks until the TUN fd is closed or an unrecoverable error occurs.
 func ForwardTUN(tunFd int64, socksAddr string, protector SocketProtector) error {
+	return ForwardTUNWithDNS(tunFd, socksAddr, nil, protector)
+}
+
+// ForwardTUNWithDNS is like ForwardTUN but lets the caller specify the DoH
+// server URLs to use for DNS interception.  Pass nil for dohServers to use the
+// default set (Cloudflare, Google, Quad9).  Passing an empty non-nil slice
+// disables DNS interception entirely.
+func ForwardTUNWithDNS(tunFd int64, socksAddr string, dohServers []string, protector SocketProtector) error {
 	f := os.NewFile(uintptr(tunFd), "tun")
 	if f == nil {
 		return fmt.Errorf("tun: invalid file descriptor %d", tunFd)
+	}
+
+	// Build a DoH client unless the caller explicitly opts out by passing an
+	// empty (non-nil) slice.
+	var dohClient *dns.Client
+	if dohServers == nil || len(dohServers) > 0 {
+		dohClient = dns.NewClient(dohServers)
+		log.Printf("tun: DNS-over-HTTPS interception enabled (%d servers)", len(dohClient.Servers()))
 	}
 
 	fw := &tunForwarder{
 		tun:       f,
 		socksAddr: socksAddr,
 		protector: protector,
+		dohClient: dohClient,
 		done:      make(chan struct{}),
 	}
 
@@ -133,13 +158,31 @@ func (fw *tunForwarder) handlePacket(pkt []byte) {
 		return
 	}
 	proto := pkt[9]
-	if proto != 6 { // TCP only
-		return
-	}
 
 	var srcIP, dstIP [4]byte
 	copy(srcIP[:], pkt[12:16])
 	copy(dstIP[:], pkt[16:20])
+
+	// Intercept UDP port-53 DNS queries and resolve via DoH.
+	if proto == 17 && fw.dohClient != nil {
+		udp := pkt[ihl:]
+		if len(udp) < 8 {
+			return
+		}
+		srcPort := binary.BigEndian.Uint16(udp[0:2])
+		dstPort := binary.BigEndian.Uint16(udp[2:4])
+		udpLen := int(binary.BigEndian.Uint16(udp[4:6]))
+		if dstPort == 53 && udpLen >= 8 && len(udp) >= udpLen {
+			payload := make([]byte, udpLen-8)
+			copy(payload, udp[8:udpLen])
+			go fw.handleDNSQuery(srcIP, dstIP, srcPort, dstPort, payload)
+		}
+		return
+	}
+
+	if proto != 6 { // everything else: TCP only
+		return
+	}
 
 	tcp := pkt[ihl:]
 	if len(tcp) < 20 {
@@ -214,6 +257,27 @@ func (fw *tunForwarder) handlePacket(pkt []byte) {
 				}
 			}
 		}
+	}
+}
+
+// handleDNSQuery intercepts a UDP DNS query from the TUN and resolves it via
+// DNS-over-HTTPS, then injects the response back as a UDP packet on the TUN.
+// This prevents the ISP from seeing or forging DNS queries.
+func (fw *tunForwarder) handleDNSQuery(srcIP, dstIP [4]byte, srcPort, dstPort uint16, query []byte) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := fw.dohClient.Exchange(ctx, query)
+	if err != nil {
+		log.Printf("tun: DoH query failed: %v", err)
+		return
+	}
+
+	// Build a UDP response packet: swap src/dst so it looks like it came from
+	// the DNS server the device originally queried.
+	pkt := buildUDPPacket(dstIP[:], srcIP[:], dstPort, srcPort, resp)
+	if err := fw.writePkt(pkt); err != nil {
+		log.Printf("tun: write DNS response: %v", err)
 	}
 }
 
@@ -494,4 +558,68 @@ func tcpChecksum(srcIP, dstIP, tcpSeg []byte) uint16 {
 		sum = (sum & 0xffff) + (sum >> 16)
 	}
 	return ^uint16(sum)
+}
+
+// buildUDPPacket crafts a complete IPv4/UDP packet with correct checksums.
+// Used to inject DNS responses back into the TUN interface.
+func buildUDPPacket(srcIP, dstIP []byte, srcPort, dstPort uint16, payload []byte) []byte {
+	const ipHdrLen = 20
+	const udpHdrLen = 8
+	totalLen := ipHdrLen + udpHdrLen + len(payload)
+
+	pkt := make([]byte, totalLen)
+
+	// IPv4 header.
+	pkt[0] = 0x45 // version=4, IHL=5 (20 bytes)
+	pkt[1] = 0    // DSCP/ECN
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
+	binary.BigEndian.PutUint16(pkt[4:6], 0)    // ID
+	binary.BigEndian.PutUint16(pkt[6:8], 0x40) // flags=DF, frag offset=0
+	pkt[8] = 64                                // TTL
+	pkt[9] = 17                                // protocol = UDP
+	// IP checksum at [10:12] — computed below after src/dst filled in.
+	copy(pkt[12:16], srcIP[:4])
+	copy(pkt[16:20], dstIP[:4])
+	binary.BigEndian.PutUint16(pkt[10:12], ipChecksum(pkt[:ipHdrLen]))
+
+	// UDP header.
+	udp := pkt[ipHdrLen:]
+	binary.BigEndian.PutUint16(udp[0:2], srcPort)
+	binary.BigEndian.PutUint16(udp[2:4], dstPort)
+	binary.BigEndian.PutUint16(udp[4:6], uint16(udpHdrLen+len(payload)))
+	// UDP checksum at [6:8] — computed after copying payload.
+	copy(udp[8:], payload)
+	binary.BigEndian.PutUint16(udp[6:8], udpChecksum(pkt[12:16], pkt[16:20], udp))
+
+	return pkt
+}
+
+// udpChecksum computes the UDP checksum using the IPv4 pseudo-header (RFC 768).
+func udpChecksum(srcIP, dstIP, udpSeg []byte) uint16 {
+	// Pseudo-header: src IP (4), dst IP (4), zero (1), protocol 17 (1), UDP length (2).
+	pseudo := make([]byte, 12)
+	copy(pseudo[0:4], srcIP)
+	copy(pseudo[4:8], dstIP)
+	pseudo[8] = 0
+	pseudo[9] = 17
+	binary.BigEndian.PutUint16(pseudo[10:12], uint16(len(udpSeg)))
+
+	var sum uint32
+	for _, b := range [][]byte{pseudo, udpSeg} {
+		for i := 0; i+1 < len(b); i += 2 {
+			sum += uint32(binary.BigEndian.Uint16(b[i : i+2]))
+		}
+		if len(b)%2 != 0 {
+			sum += uint32(b[len(b)-1]) << 8
+		}
+	}
+	for sum>>16 != 0 {
+		sum = (sum & 0xffff) + (sum >> 16)
+	}
+	result := ^uint16(sum)
+	// RFC 768: a computed checksum of 0 must be sent as 0xFFFF.
+	if result == 0 {
+		return 0xFFFF
+	}
+	return result
 }

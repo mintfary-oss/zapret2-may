@@ -13,6 +13,20 @@ type Config struct {
 	Bypass   BypassConfig   `yaml:"bypass"`
 	Hostlist HostlistConfig `yaml:"hostlist"`
 	NFQueue  NFQueueConfig  `yaml:"nfqueue"`
+	DNS      DNSConfig      `yaml:"dns"`
+}
+
+// DNSConfig controls the built-in DNS-over-HTTPS protection.
+// When enabled, a local UDP resolver proxies all DNS queries through DoH so
+// that the ISP cannot poison or monitor name resolution.
+type DNSConfig struct {
+	// Enabled activates the local DoH resolver.
+	Enabled bool `yaml:"enabled"`
+	// ListenAddr is the UDP address for the local resolver (e.g. "127.0.0.1:5300").
+	ListenAddr string `yaml:"listen_addr"`
+	// Servers lists the DoH server URLs to use.  When empty, Cloudflare,
+	// Google, and Quad9 are used.
+	Servers []string `yaml:"servers"`
 }
 
 // NFQueueConfig controls the optional Linux netfilter-queue integration.
@@ -83,6 +97,10 @@ func defaults() *Config {
 			Enabled:    false,
 			AutoUpdate: true,
 			URL:        "https://antifilter.download/list/domains.lst",
+		},
+		DNS: DNSConfig{
+			Enabled:    true,
+			ListenAddr: "127.0.0.1:5300",
 		},
 	}
 }

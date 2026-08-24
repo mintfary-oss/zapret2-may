@@ -7,9 +7,10 @@
 | 1 | Ядро + Docker + Linux | ✅ Завершена |
 | 2 | Fake packets + nfqueue + TLS record | ✅ Завершена |
 | 3 | Android APK (gomobile + VpnService) | ✅ Завершена |
-| 4 | Windows GUI + WinDivert | 🔄 Следующая |
-| 5 | ECH + тесты + качество | 📋 В плане |
-| 6 | Android улучшения | 📋 В плане |
+| 4 | DNS-over-HTTPS (DoH) защита | ✅ Завершена |
+| 5 | Windows GUI + WinDivert | 🔄 Следующая |
+| 6 | ECH + тесты + качество | 📋 В плане |
+| 7 | Android улучшения (IPv6/UDP, per-app) | 📋 В плане |
 
 ---
 

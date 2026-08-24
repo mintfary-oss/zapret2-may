@@ -26,6 +26,10 @@ type Controller interface {
 	GetStats() types.StatsSnapshot
 	HostlistSize() int
 	RunAutoDetect(target string) []types.ProbeResult
+	// DNSEnabled reports whether the local DoH resolver is running.
+	DNSEnabled() bool
+	// DNSStats returns the total query and error counts from the DoH resolver.
+	DNSStats() (queries, errors int64)
 }
 
 // UI is the HTTP server that hosts the web control panel.
@@ -92,6 +96,9 @@ type statusResponse struct {
 	Strategy     string `json:"strategy"`
 	ListenAddr   string `json:"listen_addr"`
 	HostlistSize int    `json:"hostlist_size"`
+	DNSEnabled   bool   `json:"dns_enabled"`
+	DNSQueries   int64  `json:"dns_queries"`
+	DNSErrors    int64  `json:"dns_errors"`
 }
 
 type toggleRequest struct {
@@ -109,11 +116,15 @@ type autoDetectRequest struct {
 // ---- Handlers ----
 
 func (u *UI) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	dnsQ, dnsE := u.ctrl.DNSStats()
 	writeJSON(w, statusResponse{
 		Enabled:      u.ctrl.Enabled(),
 		Strategy:     u.ctrl.Strategy(),
 		ListenAddr:   u.cfg.Proxy.ListenAddr,
 		HostlistSize: u.ctrl.HostlistSize(),
+		DNSEnabled:   u.ctrl.DNSEnabled(),
+		DNSQueries:   dnsQ,
+		DNSErrors:    dnsE,
 	})
 }
 
@@ -386,6 +397,7 @@ button.small.warn{background:var(--warn)}
   </div>
 
   <div class="addr" id="addr-text"></div>
+  <div class="addr" id="dns-text" style="margin-top:.3rem"></div>
 </div>
 
 <div id="log-box"></div>
@@ -528,6 +540,15 @@ async function loadStatus(){
   document.getElementById('strategy').value = s.strategy;
   const hl = s.hostlist_size > 0 ? ' · домены: ' + s.hostlist_size : '';
   document.getElementById('addr-text').textContent = 'SOCKS5: ' + s.listen_addr + hl;
+  const dnsEl = document.getElementById('dns-text');
+  if(s.dns_enabled){
+    dnsEl.innerHTML = '🔒 DNS-over-HTTPS активен · запросов: <b>' + s.dns_queries + '</b>' +
+      (s.dns_errors > 0 ? ' · ошибок: <span style="color:var(--red)">' + s.dns_errors + '</span>' : '');
+    dnsEl.style.color = 'var(--green)';
+  } else {
+    dnsEl.textContent = '⚠ DNS-over-HTTPS выключен (DNS может быть подменён)';
+    dnsEl.style.color = 'var(--warn)';
+  }
 }
 
 function updateBtn(){

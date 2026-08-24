@@ -4,6 +4,7 @@
 package proxy
 
 import (
+	"context"
 	"log"
 	"net"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/mintfary-oss/freenet/internal/bypass"
 	"github.com/mintfary-oss/freenet/internal/config"
+	"github.com/mintfary-oss/freenet/internal/dns"
 	"github.com/mintfary-oss/freenet/internal/logs"
 	"github.com/mintfary-oss/freenet/internal/sysproxy"
 	"github.com/mintfary-oss/freenet/internal/types"
@@ -25,6 +27,8 @@ var _ interface {
 	GetStats() types.StatsSnapshot
 	HostlistSize() int
 	RunAutoDetect(string) []types.ProbeResult
+	DNSEnabled() bool
+	DNSStats() (int64, int64)
 } = (*Server)(nil)
 
 // Server manages the proxy listeners and exposes a toggle to enable/disable
@@ -34,6 +38,7 @@ type Server struct {
 	ring    *logs.Ring
 	engine  *bypass.Engine
 	nfq     *NFQueueServer
+	dnsRes  *dns.Resolver // optional; nil if DNS protection disabled
 	enabled atomic.Bool
 	Stats   Stats
 
@@ -55,8 +60,23 @@ func NewServer(cfg *config.Config, ring *logs.Ring) *Server {
 }
 
 // Start opens the listening sockets and launches accept loops in background
-// goroutines.
+// goroutines.  If DNS protection is enabled in config it also starts the local
+// DoH resolver and wires a DoH-aware HTTP client into the hostlist downloader.
 func (s *Server) Start() error {
+	// Start the DoH DNS resolver before any network activity so that hostlist
+	// downloads use encrypted resolution from the very first request.
+	if s.cfg.DNS.Enabled {
+		dohClient := dns.NewClient(s.cfg.DNS.Servers)
+		res := dns.NewResolver(s.cfg.DNS.ListenAddr, dohClient)
+		if err := res.Start(context.Background()); err != nil {
+			log.Printf("dns: resolver start failed: %v (DNS protection disabled)", err)
+		} else {
+			s.dnsRes = res
+			s.engine.SetHTTPClient(dns.NewDoHHTTPClient(s.cfg.DNS.ListenAddr))
+			log.Printf("dns: DoH protection active on %s", s.cfg.DNS.ListenAddr)
+		}
+	}
+
 	ln, err := net.Listen("tcp", s.cfg.Proxy.ListenAddr)
 	if err != nil {
 		return err
@@ -102,6 +122,9 @@ func (s *Server) Start() error {
 func (s *Server) Stop() {
 	sysproxy.Restore()
 	s.nfq.Stop()
+	if s.dnsRes != nil {
+		s.dnsRes.Stop()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.socksLn != nil {
@@ -153,3 +176,15 @@ func (s *Server) HostlistSize() int { return s.engine.Hostlist().Size() }
 func (s *Server) RunAutoDetect(target string) []types.ProbeResult {
 	return s.engine.RunAutoDetect(target)
 }
+
+// DNSStats returns DNS query and error counters from the local DoH resolver.
+// Returns (0, 0) when DNS protection is disabled.
+func (s *Server) DNSStats() (queries, errors int64) {
+	if s.dnsRes != nil {
+		return s.dnsRes.Queries(), s.dnsRes.Errors()
+	}
+	return 0, 0
+}
+
+// DNSEnabled reports whether the local DoH resolver is running.
+func (s *Server) DNSEnabled() bool { return s.dnsRes != nil }

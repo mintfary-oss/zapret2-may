@@ -7,6 +7,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
 
 	"github.com/mintfary-oss/freenet/internal/config"
 	"github.com/mintfary-oss/freenet/internal/types"
@@ -59,6 +60,13 @@ func (e *Engine) Reload(cfg *config.Config) {
 
 // Hostlist returns the engine's domain filter (read-only access for stats).
 func (e *Engine) Hostlist() *Hostlist { return e.hostlist }
+
+// SetHTTPClient sets the HTTP client used for hostlist downloads.
+// Call this with a DoH-aware client (dns.NewDoHHTTPClient) before the engine
+// starts its download goroutine to ensure name resolution bypasses the ISP.
+func (e *Engine) SetHTTPClient(c *http.Client) {
+	e.hostlist.SetHTTPClient(c)
+}
 
 // Relay pipes data between client and remote, applying the configured
 // bypass strategy to the first outbound segment (TLS ClientHello).
