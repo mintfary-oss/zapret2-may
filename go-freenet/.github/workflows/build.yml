@@ -1,20 +1,28 @@
-name: Build FreeNet
+name: Build & Release FreeNet
 
+# Triggers:
+#  - push to main branches / neo branches   → build only (no release)
+#  - push to version tag  v*.*.*            → build + create GitHub Release
+#  - pull_request                           → build only
 on:
   push:
     branches: ["master", "main", "neo/**"]
-    paths: ["go-freenet/**"]
+    tags:     ["v*.*.*"]
+    paths:    ["go-freenet/**"]
   pull_request:
     paths: ["go-freenet/**"]
-  release:
-    types: [created]
 
 defaults:
   run:
     working-directory: go-freenet
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Jobs
+# ─────────────────────────────────────────────────────────────────────────────
+
 jobs:
-  # ---- lint & vet ----
+
+  # ── lint & vet ─────────────────────────────────────────────────────────────
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -38,7 +46,7 @@ jobs:
             exit 1
           fi
 
-  # ---- cross-compile ----
+  # ── Linux & Windows binaries ───────────────────────────────────────────────
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
@@ -70,11 +78,12 @@ jobs:
 
       - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          GOARM: ${{ matrix.goarm }}
-          CGO_ENABLED: "0"
+          GOOS:         ${{ matrix.goos }}
+          GOARCH:       ${{ matrix.goarch }}
+          GOARM:        ${{ matrix.goarm }}
+          CGO_ENABLED:  "0"
         run: |
+          mkdir -p dist
           go build -ldflags="-s -w" \
             -o dist/${{ matrix.artifact }} \
             ./cmd/freenet
@@ -86,32 +95,39 @@ jobs:
           path: go-freenet/dist/${{ matrix.artifact }}
           retention-days: 30
 
-  # ---- Android AAR (gomobile) ----
-  android-aar:
-    name: Android AAR (gomobile)
+  # ── Android APK (gomobile + Gradle) ────────────────────────────────────────
+  android:
+    name: Android APK
     runs-on: ubuntu-latest
     needs: lint
 
     steps:
       - uses: actions/checkout@v4
 
+      # Go toolchain for gomobile.
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache-dependency-path: go-freenet/go.sum
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      # JDK required by Gradle.
+      - uses: actions/setup-java@v4
         with:
           java-version: "17"
           distribution: "temurin"
 
-      - name: Set up Android SDK / NDK
-        uses: android-actions/setup-android@v3
+      # Gradle — provides the `gradle` command used below.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      # Android SDK + NDK via sdkmanager.
+      - uses: android-actions/setup-android@v3
 
       - name: Install Android NDK
         run: sdkmanager "ndk;26.3.11579264"
 
+      # Install gomobile and build the AAR.
       - name: Install gomobile
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
@@ -122,57 +138,143 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.3.11579264
         run: |
+          mkdir -p dist
           gomobile bind \
-            -target android/arm64,android/arm,android/amd64 \
+            -target     android/arm64,android/arm,android/amd64 \
             -androidapi 26 \
-            -javapkg com.freenet.bypass \
-            -o dist/mobile.aar \
+            -javapkg    com.freenet.bypass \
+            -o          dist/mobile.aar \
             ./internal/mobile
 
-      - name: Build debug APK
+      # Copy AAR into the Android project and build the APK with Gradle.
+      - name: Build Android APK
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.3.11579264
         run: |
           mkdir -p android/app/libs
           cp dist/mobile.aar android/app/libs/mobile.aar
+          # Use `gradle` (installed above) to generate the Gradle wrapper, then
+          # use the wrapper for the actual build (consistent with local builds).
           cd android
-          chmod +x ./gradlew || true
-          # Download gradlew wrapper if not present.
-          if [ ! -f gradlew ]; then
-            gradle wrapper --gradle-version 8.11.1 2>/dev/null || true
-          fi
+          gradle wrapper --gradle-version=8.11.1 --no-daemon
+          chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon
+          # Copy APK to dist/ so the release job can find it.
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             ../dist/freenet-android.apk
 
-      - name: Upload AAR artifact
+      - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
           name: mobile-aar
           path: go-freenet/dist/mobile.aar
           retention-days: 30
 
-      - name: Upload debug APK artifact
+      - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: freenet-debug.apk
-          path: go-freenet/android/app/build/outputs/apk/debug/app-debug.apk
+          name: freenet-android.apk
+          path: go-freenet/dist/freenet-android.apk
           retention-days: 30
 
-  # ---- release: attach binaries ----
-  release:
-    name: Attach release binaries
+  # ── Linux install script (bundled into the release) ───────────────────────
+  package-linux:
+    name: Package Linux installer
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'release'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download the already-built Linux binary.
+      - uses: actions/download-artifact@v4
+        with:
+          name: freenet-linux-amd64
+          path: dist/
+
+      # Package: binary + install script in a self-extracting tar.
+      - name: Create Linux installer bundle
+        run: |
+          mkdir -p bundle/freenet
+          cp dist/freenet-linux-amd64      bundle/freenet/freenet
+          cp scripts/install.sh             bundle/freenet/install.sh
+          cp init.d/systemd/freenet.service bundle/freenet/freenet.service
+          chmod +x bundle/freenet/freenet bundle/freenet/install.sh
+          tar -C bundle -czf dist/freenet-linux-amd64-installer.tar.gz freenet/
+          echo "Bundle contents:"
+          tar -tzf dist/freenet-linux-amd64-installer.tar.gz
+
+      - name: Upload Linux installer bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: freenet-linux-amd64-installer
+          path: go-freenet/dist/freenet-linux-amd64-installer.tar.gz
+          retention-days: 30
+
+  # ── GitHub Release (runs only on version tag push) ─────────────────────────
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    # Wait for ALL build jobs to finish.
+    needs: [build, android, package-linux]
+    # Only run on tag pushes (v*.*.*).
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
     steps:
+      # Download every artifact uploaded in the jobs above.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist/
           merge-multiple: true
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
+      # Also bundle the install scripts so they are downloadable directly.
+      - name: Add install scripts to release
+        run: |
+          cp go-freenet/scripts/install.sh          dist/install.sh
+          cp go-freenet/scripts/install-windows.ps1 dist/install-windows.ps1
+          chmod +x dist/install.sh
+
+      - name: List release artifacts
+        run: ls -lh dist/
+
+      # Create the release and attach all artifacts.
+      - uses: softprops/action-gh-release@v2
         with:
+          name: "FreeNet ${{ github.ref_name }}"
+          body: |
+            ## FreeNet ${{ github.ref_name }} — Обход DPI / DPI bypass
+
+            ### Установка
+
+            **Linux (amd64)** — одна команда:
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/freenet-linux-amd64-installer.tar.gz | tar xz && sudo bash freenet/install.sh
+            ```
+
+            **Windows** — скачай `.exe`, запусти от администратора:
+            ```
+            freenet-windows-amd64.exe -install
+            ```
+
+            **Android** — скачай `freenet-android.apk`, включи «Установка из неизвестных источников» и установи.
+
+            ---
+
+            | Платформа | Файл |
+            |-----------|------|
+            | Linux amd64 | `freenet-linux-amd64` |
+            | Linux arm64 | `freenet-linux-arm64` |
+            | Linux ARMv7 (роутеры) | `freenet-linux-armv7` |
+            | Linux installer bundle | `freenet-linux-amd64-installer.tar.gz` |
+            | Windows 64-bit | `freenet-windows-amd64.exe` |
+            | Android APK | `freenet-android.apk` |
+            | Android AAR (разработчикам) | `mobile.aar` |
+
+          generate_release_notes: true
           files: dist/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}

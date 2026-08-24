@@ -1,88 +1,108 @@
 #!/usr/bin/env bash
-# FreeNet installation script for Linux (systemd).
-# Run as root:  sudo bash install.sh
+# FreeNet — Linux one-command installer.
 #
-# What it does:
-#   1. Builds the freenet binary from source (requires Go 1.22+)
-#   2. Installs the binary to /usr/local/bin/freenet
-#   3. Creates the freenet system user
-#   4. Writes a default config to /etc/freenet/config.yaml
-#   5. Installs and enables the systemd service
-#   6. Optionally sets up iptables transparent proxy rules
+# Downloads the latest pre-built binary from GitHub Releases, installs it as
+# a systemd service, and starts it immediately.  No Go toolchain required.
+#
+# One-liner:
+#   curl -fsSL https://github.com/mintfary-oss/zapret2-may/releases/latest/download/install.sh | sudo bash
+#
+# Or with a local clone:
+#   sudo bash go-freenet/scripts/install.sh
+#
+# Supports: Linux amd64, arm64, ARMv7 (Raspberry Pi, routers)
 
 set -euo pipefail
 
+# ── Configuration ─────────────────────────────────────────────────────────────
+GITHUB_REPO="mintfary-oss/zapret2-may"
 INSTALL_BIN="/usr/local/bin/freenet"
 CONFIG_DIR="/etc/freenet"
 DATA_DIR="/var/lib/freenet"
 SERVICE_FILE="/etc/systemd/system/freenet.service"
-SERVICE_UNIT="$(dirname "$0")/../init.d/systemd/freenet.service"
+WEB_ADDR="127.0.0.1:8080"
+SOCKS_ADDR="127.0.0.1:1080"
 
-# ---- colour helpers ----
-GREEN="\033[0;32m"; YELLOW="\033[1;33m"; RED="\033[0;31m"; RESET="\033[0m"
-info()  { echo -e "${GREEN}[+]${RESET} $*"; }
-warn()  { echo -e "${YELLOW}[!]${RESET} $*"; }
-error() { echo -e "${RED}[✗]${RESET} $*"; exit 1; }
+# ── Colour helpers ────────────────────────────────────────────────────────────
+G="\033[0;32m" Y="\033[1;33m" R="\033[0;31m" B="\033[1;34m" N="\033[0m"
+info()    { echo -e "${G}[+]${N} $*"; }
+warn()    { echo -e "${Y}[!]${N} $*"; }
+error()   { echo -e "${R}[✗]${N} $*" >&2; exit 1; }
+step()    { echo -e "${B}━━ $* ${N}"; }
 
-# ---- root check ----
-[ "$(id -u)" -eq 0 ] || error "please run as root: sudo bash $0"
+# ── Checks ────────────────────────────────────────────────────────────────────
+[ "$(id -u)" -eq 0 ] || error "Run as root:  sudo bash $0"
+command -v curl  >/dev/null 2>&1 || error "curl is required (apt install curl)"
+command -v systemctl >/dev/null 2>&1 || error "systemd not found — install manually"
 
-# ---- build ----
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$SCRIPT_DIR/.."
+# ── Detect architecture ────────────────────────────────────────────────────────
+step "Detecting system architecture"
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64)           BIN="freenet-linux-amd64" ;;
+  aarch64|arm64)    BIN="freenet-linux-arm64" ;;
+  armv7l|armv7)     BIN="freenet-linux-armv7" ;;
+  *)                error "Unsupported architecture: $ARCH. Build from source: go build ./cmd/freenet" ;;
+esac
+info "Architecture: $ARCH → $BIN"
 
-if ! command -v go &>/dev/null; then
-  error "Go is not installed. Install from https://go.dev/dl/"
-fi
-GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-info "building freenet with Go $GO_VERSION"
+# ── Download ──────────────────────────────────────────────────────────────────
+step "Downloading latest FreeNet binary"
+URL="https://github.com/${GITHUB_REPO}/releases/latest/download/${BIN}"
+info "URL: $URL"
+TMP=$(mktemp)
+curl -fsSL --progress-bar -o "$TMP" "$URL"
+chmod +x "$TMP"
 
-(cd "$PROJECT_DIR" && \
-  CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/freenet ./cmd/freenet)
+# Quick sanity check.
+"$TMP" -version 2>/dev/null || true
 
-info "installing binary → $INSTALL_BIN"
-install -m 755 /tmp/freenet "$INSTALL_BIN"
-rm -f /tmp/freenet
+# ── Install binary ────────────────────────────────────────────────────────────
+step "Installing binary"
+install -m 755 "$TMP" "$INSTALL_BIN"
+rm -f "$TMP"
+info "Installed → $INSTALL_BIN"
 
-# ---- user ----
-if ! id -u freenet &>/dev/null; then
-  info "creating system user 'freenet'"
+# ── Create system user ────────────────────────────────────────────────────────
+step "Setting up system user"
+if ! id -u freenet &>/dev/null 2>&1; then
   useradd -r -s /sbin/nologin -d "$DATA_DIR" freenet
+  info "Created user 'freenet'"
+else
+  info "User 'freenet' already exists"
 fi
 
-# ---- directories ----
+# ── Directories ───────────────────────────────────────────────────────────────
 install -d -m 755 -o freenet -g freenet "$CONFIG_DIR" "$DATA_DIR"
 
-# ---- default config ----
+# ── Default config ────────────────────────────────────────────────────────────
+step "Writing configuration"
 if [ ! -f "$CONFIG_DIR/config.yaml" ]; then
-  info "writing default config → $CONFIG_DIR/config.yaml"
-  cat > "$CONFIG_DIR/config.yaml" <<'EOF'
+  cat > "$CONFIG_DIR/config.yaml" <<YAML
 proxy:
-  listen_addr: "127.0.0.1:1080"
-  transparent_addr: ""   # set to "127.0.0.1:1090" to enable transparent proxy
+  listen_addr: "${SOCKS_ADDR}"
+  transparent_addr: ""   # "127.0.0.1:1090" to enable transparent proxy
 
 bypass:
-  strategy: "auto"    # auto | split | disorder | none
-  split_pos: 2        # byte offset within TLS ClientHello to split
+  strategy: "auto"    # auto | split | disorder | fake | tlsrec | combined | none
+  split_pos: 2
   fake_ttl: 8
-  disorder_frag: false
 
 hostlist:
   enabled: false
-  path: "/var/lib/freenet/domains.lst"
+  path: "${DATA_DIR}/domains.lst"
   auto_update: true
   url: "https://antifilter.download/list/domains.lst"
-EOF
+YAML
   chown freenet:freenet "$CONFIG_DIR/config.yaml"
+  info "Config written → $CONFIG_DIR/config.yaml"
+else
+  info "Config already exists, skipping"
 fi
 
-# ---- systemd service ----
-info "installing systemd service"
-if [ -f "$SERVICE_UNIT" ]; then
-  install -m 644 "$SERVICE_UNIT" "$SERVICE_FILE"
-else
-  # Write inline if the source file is missing (standalone script mode).
-  cat > "$SERVICE_FILE" <<'UNIT'
+# ── systemd service ───────────────────────────────────────────────────────────
+step "Installing systemd service"
+cat > "$SERVICE_FILE" <<UNIT
 [Unit]
 Description=FreeNet — DPI bypass (Russia / RKN / TSPU)
 After=network-online.target
@@ -92,34 +112,41 @@ Wants=network-online.target
 Type=simple
 User=freenet
 Group=freenet
-ExecStart=/usr/local/bin/freenet -config /etc/freenet/config.yaml -web 127.0.0.1:8080
+ExecStart=${INSTALL_BIN} -config ${CONFIG_DIR}/config.yaml -web ${WEB_ADDR}
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/etc/freenet /var/lib/freenet
+ReadWritePaths=${CONFIG_DIR} ${DATA_DIR}
 PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-fi
 
 systemctl daemon-reload
 systemctl enable freenet
 systemctl restart freenet
 
-info "freenet is running!"
+# ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "  Web UI  → ${GREEN}http://127.0.0.1:8080${RESET}"
-echo -e "  SOCKS5  → ${GREEN}127.0.0.1:1080${RESET}"
-echo -e "  Logs    → journalctl -u freenet -f"
+echo -e "  ${G}✓ FreeNet установлен и запущен!${N}"
+echo ""
+echo -e "  Веб-интерфейс  → ${B}http://${WEB_ADDR}${N}"
+echo -e "  SOCKS5 прокси  → ${B}${SOCKS_ADDR}${N}"
+echo -e "  Логи           → journalctl -u freenet -f"
+echo -e "  Остановить     → systemctl stop freenet"
+echo -e "  Статус         → systemctl status freenet"
 echo ""
 
-# ---- optional transparent proxy ----
-read -rp "$(echo -e "${YELLOW}[?]${RESET} Set up iptables transparent proxy? (y/N) ")" ans
-if [[ "${ans,,}" == "y" ]]; then
-  bash "$(dirname "$0")/setup-transparent.sh"
+# ── Optional: transparent proxy ───────────────────────────────────────────────
+if [[ -t 0 ]]; then  # only prompt when running interactively
+  read -rp "$(echo -e "${Y}[?]${N} Настроить iptables прозрачный прокси? (y/N) ")" ans
+  if [[ "${ans,,}" == "y" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    bash "$SCRIPT_DIR/setup-transparent.sh" 2>/dev/null || \
+      warn "setup-transparent.sh not found — run manually from the source tree"
+  fi
 fi

@@ -1,6 +1,13 @@
-// FreeNet — cross-platform DPI bypass tool for Go.
-// Intercepts TCP/UDP traffic and applies desynchronization strategies
-// to evade Deep Packet Inspection used by Russian ISPs (TSPU/RKN).
+// FreeNet — cross-platform DPI bypass tool.
+// Intercepts TCP traffic and applies desynchronization strategies to evade
+// Deep Packet Inspection used by Russian ISPs (TSPU/RKN).
+//
+// Usage:
+//
+//	freenet                          # start proxy + web UI (default ports)
+//	freenet -web :9000               # custom web UI port
+//	freenet -install                 # Windows: install as auto-start service
+//	freenet -uninstall               # Windows: remove service
 package main
 
 import (
@@ -17,12 +24,14 @@ import (
 	"github.com/mintfary-oss/freenet/internal/web"
 )
 
-const version = "0.1.0"
+const version = "0.3.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
-	webAddr := flag.String("web", ":8080", "web UI listen address")
+	webAddr := flag.String("web", ":8080", "web UI listen address (use 0.0.0.0:8080 for LAN access)")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	doInstall := flag.Bool("install", false, "Windows: install as auto-start Windows service (run as Administrator)")
+	doUninstall := flag.Bool("uninstall", false, "Windows: remove Windows service")
 	flag.Parse()
 
 	if *showVersion {
@@ -30,13 +39,31 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Load configuration (creates default if missing).
+	// Windows service management (no-op on non-Windows via build tags).
+	if *doInstall {
+		if err := installService(*cfgPath, *webAddr); err != nil {
+			fmt.Fprintf(os.Stderr, "install error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("FreeNet service installed and started.")
+		fmt.Printf("Web UI → http://localhost%s\n", *webAddr)
+		return
+	}
+	if *doUninstall {
+		if err := uninstallService(); err != nil {
+			fmt.Fprintf(os.Stderr, "uninstall error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Load configuration (creates a default config.yaml if missing).
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
 
-	// Initialise shared ring-buffer log that the web UI streams.
+	// Initialise shared ring-buffer log streamed to the web UI.
 	ring := logs.NewRing(1000)
 	log.SetOutput(ring)
 	log.SetFlags(log.Ltime | log.Lmsgprefix)
@@ -56,10 +83,15 @@ func main() {
 		log.Fatalf("web ui: %v", err)
 	}
 
-	log.Printf("web UI → http://localhost%s", *webAddr)
-	log.Printf("SOCKS5 proxy → %s", cfg.Proxy.ListenAddr)
+	log.Printf("web UI  → http://localhost%s", *webAddr)
+	log.Printf("SOCKS5  → %s", cfg.Proxy.ListenAddr)
 
-	// Block until SIGINT/SIGTERM.
+	// On Windows open the browser automatically if not running as a service.
+	if !isWindowsService() {
+		openBrowser("http://localhost" + *webAddr)
+	}
+
+	// Block until SIGINT / SIGTERM.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
