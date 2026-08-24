@@ -5,64 +5,91 @@
 1. [Обзор архитектуры](#1-обзор-архитектуры)
 2. [Как работает обход DPI](#2-как-работает-обход-dpi)
 3. [Стратегии обхода](#3-стратегии-обхода)
-4. [Перехват трафика](#4-перехват-трафика)
-5. [SOCKS5 прокси](#5-socks5-прокси)
-6. [Веб-интерфейс](#6-веб-интерфейс)
-7. [Android архитектура](#7-android-архитектура)
-8. [Конфигурация](#8-конфигурация)
-9. [Сборка и деплой](#9-сборка-и-деплой)
-10. [CI/CD pipeline](#10-cicd-pipeline)
-11. [Безопасность](#11-безопасность)
+4. [DNS-over-HTTPS защита](#4-dns-over-https-защита)
+5. [Перехват трафика](#5-перехват-трафика)
+6. [SOCKS5 прокси](#6-socks5-прокси)
+7. [Веб-интерфейс](#7-веб-интерфейс)
+8. [Android архитектура](#8-android-архитектура)
+9. [Windows интеграция](#9-windows-интеграция)
+10. [Конфигурация](#10-конфигурация)
+11. [Сборка и деплой](#11-сборка-и-деплой)
+12. [CI/CD pipeline](#12-cicd-pipeline)
+13. [Безопасность](#13-безопасность)
 
 ---
 
 ## 1. Обзор архитектуры
 
-FreeNet Go — SOCKS5 прокси с модулем обхода DPI, написанный на Go.
-Работает на уровне пользователя (userspace), не требует изменений ядра.
+FreeNet Go — кросс-платформенный инструмент обхода блокировок, написанный на Go.
+Сочетает обход DPI (манипуляция TCP/TLS пакетами) и защиту DNS (DNS-over-HTTPS).
 
 ```
 Браузер / Приложение
         │
         │ SOCKS5 (127.0.0.1:1080)
         ▼
-┌───────────────────────────────┐
-│       SOCKS5 прокси           │
-│   internal/proxy/socks5.go    │
-└───────────┬───────────────────┘
-            │ TCP соединение к target
-            ▼
-┌───────────────────────────────┐
-│      DPI Bypass Engine        │
-│   internal/bypass/engine.go   │
-│                               │
-│  split / disorder / tlsrec /  │
-│  fake / combined / quic / auto│
-└───────────┬───────────────────┘
-            │ модифицированные TCP сегменты
-            ▼
-        Интернет (мимо ТСПУ)
+┌───────────────────────────────────┐
+│         SOCKS5 прокси             │
+│   internal/proxy/socks5.go        │
+└──────────────┬────────────────────┘
+               │ TCP соединение к target
+               ▼
+┌───────────────────────────────────┐
+│       DPI Bypass Engine           │
+│   internal/bypass/engine.go       │
+│                                   │
+│  split / tlsrec / fake / combined │
+│  disorder / quic / auto           │
+└──────────────┬────────────────────┘
+               │ модифицированные TCP сегменты
+               ▼
+           Интернет (мимо ТСПУ)
+
+Параллельно работает DNS защита:
+        │
+        │ DNS запрос (UDP :53)
+        ▼
+┌───────────────────────────────────┐
+│     Локальный DoH резолвер        │
+│   internal/dns/resolver.go        │
+│   слушает 127.0.0.1:5300          │
+└──────────────┬────────────────────┘
+               │ HTTPS POST application/dns-message
+               ▼
+    1.1.1.1 / 8.8.8.8 / 9.9.9.9
+    (Cloudflare / Google / Quad9)
 ```
 
-Для прозрачного режима (все приложения без настройки SOCKS5):
+Для автоматического перехвата всего трафика (Linux, без настройки SOCKS5):
 
 ```
 Любое приложение
-        │
-        │ обычный TCP (порт 443 и др.)
+        │ обычный TCP (порт 443)
         ▼
-  iptables REDIRECT
-  (порт 443 → 1081)
+  iptables / nfqueue (Linux)
         │
         ▼
-┌───────────────────────────────┐
-│   Прозрачный прокси           │
-│  internal/proxy/transparent.go│
-│  (SO_ORIGINAL_DST для адреса) │
-└───────────┬───────────────────┘
-            │
-            ▼
-      DPI Bypass Engine
+┌───────────────────────────────────┐
+│   Прозрачный прокси / nfqueue     │
+│  transparent.go / nfqueue.go      │
+└──────────────┬────────────────────┘
+               ▼
+         DPI Bypass Engine
+```
+
+Для Android (без root):
+
+```
+Любое приложение
+        │ все пакеты через TUN
+        ▼
+┌───────────────────────────────────┐
+│   Android VpnService TUN          │
+│   mobile/tun.go                   │
+│                                   │
+│   TCP → SOCKS5 bypass прокси      │
+│   UDP:53 → DoH (inline, без порта)│
+└───────────────────────────────────┘
 ```
 
 ---
@@ -71,24 +98,20 @@ FreeNet Go — SOCKS5 прокси с модулем обхода DPI, напи�
 
 ### Что такое DPI (Deep Packet Inspection)
 
-Российская система ТСПУ (Технические средства противодействия угрозам) использует
-DPI-оборудование (Эриксон SORM, отечественные разработки) для:
+Российская система ТСПУ использует DPI-оборудование для:
 
 1. **Анализа TLS ClientHello** — в незашифрованном заголовке TLS виден SNI (Server Name Indication) — домен, к которому подключается клиент
-2. **Блокировки по SNI** — если SNI в списке блокировки (youtube.com, instagram.com и т.д.) — соединение сбрасывается
-3. **QUIC fingerprinting** — аналогично для HTTP/3 (QUIC протокол)
+2. **Блокировки по SNI** — если SNI в списке блокировки → соединение сбрасывается TCP RST
+3. **DNS-подмены** — провайдер возвращает неправильный IP для заблокированных доменов
+4. **QUIC fingerprinting** — аналогично для HTTP/3
 
-### Почему обычный VPN работает
+### Двойная защита FreeNet
 
-VPN шифрует весь трафик до выхода из России. DPI видит только зашифрованный туннель, не может определить содержимое.
+**Уровень 1 — DPI bypass:** Манипуляция TCP/TLS пакетами так, чтобы DPI не мог собрать полный TLS ClientHello и определить SNI.
 
-**Недостатки VPN:** Сам VPN может быть заблокирован. Нужен внешний сервер.
+**Уровень 2 — DNS защита:** Все DNS запросы идут через HTTPS к зарубежным резолверам — провайдер не видит и не может подменить DNS-ответы.
 
-### Как работает FreeNet (без VPN)
-
-FreeNet манипулирует TCP-сегментами так, чтобы DPI не смог собрать полный TLS ClientHello и определить SNI, хотя реальный сервер получает все данные корректно.
-
-**Ключевой принцип:** Отправляем данные "не по порядку" или дополненные "мусором" с точки зрения DPI, но корректные для TCP-стека на обоих концах соединения.
+**Ключевой принцип DPI bypass:** Отправляем данные "не по порядку" или дополненные "мусором" с точки зрения DPI, но корректные для TCP-стека на обоих концах соединения.
 
 ---
 
@@ -118,17 +141,18 @@ Split:
 3. Отправляем два TCP сегмента: `data[:splitPos]` и `data[splitPos:]`
 
 ```go
-func (s *SplitStrategy) Apply(conn net.Conn, data []byte) error {
-    pos := findSNIOffset(data)  // из tls.go
-    if pos <= 0 || pos >= len(data) {
-        _, err := conn.Write(data)
-        return err
+func relaySplit(client, remote net.Conn, splitPos int) {
+    buf := make([]byte, 4096)
+    n, _ := client.Read(buf)
+    data := buf[:n]
+    pos := findSNIOffset(data)
+    if pos > 0 && pos < len(data) {
+        remote.Write(data[:pos])
+        remote.Write(data[pos:])
+    } else {
+        remote.Write(data)
     }
-    if _, err := conn.Write(data[:pos]); err != nil {
-        return err
-    }
-    _, err := conn.Write(data[pos:])
-    return err
+    // далее io.Copy в обоих направлениях
 }
 ```
 
@@ -154,6 +178,7 @@ Split на уровне TLS Record:
 ```
 
 DPI ожидает один Record, получает два — не может правильно разобрать ClientHello.
+Работает против DPI-систем с буферизацией на уровне TLS.
 
 ---
 
@@ -170,18 +195,24 @@ TTL=128: [Реальный TLS ClientHello] → доходит до сервер
            ↑ DPI запутан, пытается реассемблировать "неправильный" поток
 ```
 
-DPI-система обрабатывает весь трафик, включая умершие пакеты. Видит fake ClientHello (с мусорным SNI или invalid checksum), считает соединение завершённым или невалидным, реальные данные пропускает.
+DPI-система обрабатывает весь трафик, включая умершие пакеты. Видит fake ClientHello
+(с мусорным SNI или invalid checksum), считает соединение завершённым.
+
+**MD5 Fake вариант** (когда TTL не работает): отправляем пакет с неправильной TCP checksum.
+Промежуточные DPI боксы часто принимают такие пакеты, конечный хост — нет.
 
 **Требования:** `CAP_NET_RAW` (root или `setcap cap_net_raw+ep freenet`).
 
 **Реализация (Linux):**
 ```go
 //go:build linux
-func sendFake(dstIP net.IP, dstPort uint16, payload []byte) error {
+func sendFakePacket(dstIP net.IP, dstPort uint16, fakeTTL int) error {
     fd, _ := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_RAW)
-    // Строим IP пакет с TTL=4
-    pkt := buildIPPacket(dstIP, dstPort, 4, fakePayload)
-    return syscall.Sendto(fd, pkt, 0, &addr)
+    defer syscall.Close(fd)
+    pkt := buildIPPacket(dstIP, dstPort, byte(fakeTTL), buildFakeClientHello())
+    addr := &syscall.SockaddrInet4{Port: int(dstPort)}
+    copy(addr.Addr[:], dstIP.To4())
+    return syscall.Sendto(fd, pkt, 0, addr)
 }
 ```
 
@@ -193,7 +224,8 @@ func sendFake(dstIP net.IP, dstPort uint16, payload []byte) error {
 
 **Принцип:** QUIC (HTTP/3) использует UDP порт 443. Первый датаграмм — QUIC Initial — содержит SNI в открытом виде (до установки шифрования).
 
-Фрагментируем первый датаграмм QUIC Initial на несколько UDP пакетов. DPI не может восстановить полный QUIC Initial для анализа SNI.
+Фрагментируем первый датаграмм QUIC Initial на несколько UDP пакетов.
+DPI не может восстановить полный QUIC Initial для анализа SNI.
 
 ---
 
@@ -202,19 +234,20 @@ func sendFake(dstIP net.IP, dstPort uint16, payload []byte) error {
 **Файл:** `internal/bypass/autodetect.go`
 
 Алгоритм:
-1. Пробуем подключиться к `detectHost` (по умолчанию: `youtube.com:443`) без bypass
-2. Если успех — bypass не нужен, используем `none`
-3. Если ошибка/таймаут — пробуем стратегии по очереди: `split` → `tlsrec` → `combined`
-4. Первая успешная стратегия сохраняется как текущая
+1. Пробуем все стратегии по очереди: `combined` → `fake` → `tlsrec` → `split` → `disorder` → `none`
+2. Отправляем минимальный TLS ClientHello к probe-цели (по умолчанию `1.1.1.1:443`)
+3. Проверяем получение ответа (TLS ServerHello или любые данные)
+4. Первая успешная стратегия кэшируется как `winner`
+5. Все последующие подключения используют эту стратегию
 
 ```go
-func (a *AutoDetect) Probe() string {
-    for _, strategy := range []string{"split", "tlsrec", "combined", "fake"} {
-        if a.testStrategy(strategy) {
-            return strategy
+func (d *AutoDetector) Run(target string, strategies []string, splitPos int) []ProbeResult {
+    for _, s := range strategies {
+        r := probeStrategy(target, s, splitPos)
+        if r.OK && d.winner == "" {
+            d.winner = s  // кэшируем первую успешную
         }
     }
-    return "split" // fallback
 }
 ```
 
@@ -224,25 +257,241 @@ func (a *AutoDetect) Probe() string {
 
 **Файл:** `internal/bypass/hostlist.go`
 
-Bypass применяется только к доменам из списка заблокированных. Для незаблокированных сайтов трафик идёт напрямую без модификации — снижается нагрузка и latency.
+Bypass применяется только к доменам из списка заблокированных. Для остальных сайтов — прямое соединение без модификации (меньше latency, меньше нагрузки).
 
 Источники списков:
-- `antifilter.download/list/domains.lst` — 800K+ доменов
+- `antifilter.download/list/domains.lst` — 800K+ доменов из реестра РКН
 - Локальный файл `domains.lst`
-- Вручную добавленные домены в конфиге
+
+Загрузка списков использует DoH-aware HTTP клиент (начиная с v1.3.0) — сам URL резолвится через DoH.
 
 ---
 
-## 4. Перехват трафика
+## 4. DNS-over-HTTPS защита
 
-### 4.1 SOCKS5 (ручная настройка)
+### 4.1 Проблема
+
+Российские провайдеры применяют два метода блокировки одновременно:
+1. **DPI по SNI** — сбрасывают TCP соединение если видят заблокированный SNI
+2. **DNS подмена** — возвращают неправильный IP (127.0.0.1 или страницу блокировки)
+
+Стандартный DNS (UDP порт 53) — открытый протокол без шифрования. Провайдер может:
+- Подменить ответ (вернуть неправильный IP)
+- Заблокировать запрос полностью
+- Логировать все запросы
+
+### 4.2 DNS-over-HTTPS (RFC 8484)
+
+DoH оборачивает DNS запросы в обычный HTTPS запрос:
+
+```
+Клиент → POST https://1.1.1.1/dns-query
+Content-Type: application/dns-message
+[wire-format DNS query в теле]
+
+Ответ ← 200 OK
+Content-Type: application/dns-message
+[wire-format DNS ответ в теле]
+```
+
+Провайдер видит только HTTPS соединение к `1.1.1.1`. DNS запросы зашифрованы и неотличимы от обычного HTTPS трафика.
+
+### 4.3 Реализация: DoH Client
+
+**Файл:** `internal/dns/doh.go`
+
+```go
+type Client struct {
+    servers    []string        // ["https://1.1.1.1/dns-query", ...]
+    httpClient *http.Client    // стандартный HTTP клиент
+}
+
+// Exchange — отправляет wire-format DNS запрос, возвращает wire-format ответ.
+// Пробует серверы по очереди, возвращает первый успех.
+func (c *Client) Exchange(ctx context.Context, query []byte) ([]byte, error) {
+    for _, srv := range c.servers {
+        resp, err := c.doQuery(ctx, srv, query)
+        if err == nil {
+            return resp, nil
+        }
+    }
+    return nil, fmt.Errorf("all DoH servers failed")
+}
+
+func (c *Client) doQuery(ctx context.Context, server string, query []byte) ([]byte, error) {
+    req, _ := http.NewRequestWithContext(ctx, "POST", server, bytes.NewReader(query))
+    req.Header.Set("Content-Type", "application/dns-message")
+    req.Header.Set("Accept", "application/dns-message")
+    resp, _ := c.httpClient.Do(req)
+    return io.ReadAll(resp.Body)
+}
+```
+
+DNS wire format (RFC 1035) строится через `golang.org/x/net/dns/dnsmessage`:
+
+```go
+func buildQuery(name string, qtype dnsmessage.Type) ([]byte, error) {
+    fqdn, _ := dnsmessage.NewName(name + ".")
+    msg := dnsmessage.Message{
+        Header: dnsmessage.Header{ID: 1, RecursionDesired: true},
+        Questions: []dnsmessage.Question{
+            {Name: fqdn, Type: qtype, Class: dnsmessage.ClassINET},
+        },
+    }
+    return msg.Pack()
+}
+```
+
+### 4.4 Реализация: Локальный UDP резолвер
+
+**Файл:** `internal/dns/resolver.go`
+
+Запускается на `127.0.0.1:5300`. Принимает обычные UDP DNS запросы, форвардирует через DoH, возвращает ответы.
+
+```go
+type Resolver struct {
+    client     *Client
+    listenAddr string
+    conn       *net.UDPConn
+    queries    atomic.Int64   // счётчик для веб UI
+    errors     atomic.Int64
+}
+
+func (r *Resolver) forward(ctx context.Context, src *net.UDPAddr, query []byte) {
+    r.queries.Add(1)
+    resp, err := r.client.Exchange(ctx, query)
+    if err != nil {
+        r.errors.Add(1)
+        return
+    }
+    r.conn.WriteToUDP(resp, src)  // отправляем ответ обратно клиенту
+}
+```
+
+### 4.5 Реализация: DoH-aware HTTP клиент
+
+**Файл:** `internal/dns/doh.go` — функция `NewDoHHTTPClient`
+
+Для защиты самих HTTPS запросов (загрузка hostlist, авто-обновления) используем
+HTTP клиент, который резолвит имена через локальный DoH резолвер:
+
+```go
+func NewDoHHTTPClient(resolverAddr string) *http.Client {
+    // net.Resolver с кастомным Dial — все DNS запросы идут к нашему резолверу
+    r := &net.Resolver{
+        PreferGo: true,
+        Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+            return (&net.Dialer{}).DialContext(ctx, "udp", resolverAddr)
+        },
+    }
+    d := &net.Dialer{Resolver: r}
+    return &http.Client{
+        Timeout: 30 * time.Second,
+        Transport: &http.Transport{DialContext: d.DialContext},
+    }
+}
+```
+
+### 4.6 Реализация: Android TUN DNS перехват
+
+**Файл:** `mobile/tun.go`
+
+На Android нет возможности запустить отдельный UDP порт для DoH резолвера (без root).
+Поэтому TUN forwarder перехватывает UDP пакеты к порту 53 прямо внутри TUN loop:
+
+```go
+func (fw *tunForwarder) handlePacket(pkt []byte) {
+    proto := pkt[9]
+    
+    // UDP DNS перехват — только если DoH клиент задан
+    if proto == 17 && fw.dohClient != nil {
+        udp := pkt[ihl:]
+        dstPort := binary.BigEndian.Uint16(udp[2:4])
+        if dstPort == 53 {
+            payload := udp[8:udpLen]
+            go fw.handleDNSQuery(srcIP, dstIP, srcPort, dstPort, payload)
+            return
+        }
+    }
+    
+    // TCP — обычный bypass через SOCKS5
+    if proto == 6 { ... }
+}
+
+func (fw *tunForwarder) handleDNSQuery(...) {
+    resp, _ := fw.dohClient.Exchange(ctx, query)
+    // Строим UDP ответный пакет и инжектируем обратно в TUN
+    pkt := buildUDPPacket(dstIP[:], srcIP[:], dstPort, srcPort, resp)
+    fw.tun.Write(pkt)
+}
+```
+
+UDP response packet строится вручную (IPv4 + UDP заголовки с корректными checksum):
+
+```
+[IPv4 Header: 20 bytes]
+  version=4, IHL=5, TTL=64, protocol=17
+  src=DNS_SERVER_IP, dst=DEVICE_IP
+  IP checksum (ones complement)
+
+[UDP Header: 8 bytes]
+  srcPort=53, dstPort=ORIGINAL_SRC_PORT
+  length, UDP checksum (с pseudo-header)
+
+[DNS Response payload]
+```
+
+### 4.7 Интеграция в прокси-сервер
+
+**Файл:** `internal/proxy/server.go`
+
+При старте сервера (если `dns.enabled: true` в конфиге):
+
+```go
+func (s *Server) Start() error {
+    if s.cfg.DNS.Enabled {
+        dohClient := dns.NewClient(s.cfg.DNS.Servers)
+        res := dns.NewResolver(s.cfg.DNS.ListenAddr, dohClient)
+        if err := res.Start(context.Background()); err == nil {
+            s.dnsRes = res
+            // Hostlist загружается через DoH-защищённый HTTP клиент
+            s.engine.SetHTTPClient(dns.NewDoHHTTPClient(s.cfg.DNS.ListenAddr))
+        }
+    }
+    // ... запуск SOCKS5 и т.д.
+}
+```
+
+### 4.8 Статус в веб-интерфейсе
+
+API `/api/status` возвращает:
+```json
+{
+  "enabled": true,
+  "strategy": "auto",
+  "dns_enabled": true,
+  "dns_queries": 1234,
+  "dns_errors": 0
+}
+```
+
+Веб UI отображает:
+- `🔒 DNS-over-HTTPS активен · запросов: 1234` (зелёный)
+- `⚠ DNS-over-HTTPS выключен (DNS может быть подменён)` (жёлтый)
+
+---
+
+## 5. Перехват трафика
+
+### 5.1 SOCKS5 (ручная настройка)
 
 Пользователь настраивает браузер или приложение использовать SOCKS5 `127.0.0.1:1080`.
 
-Плюсы: Работает везде, не нужны права root.
-Минусы: Нужно настраивать каждое приложение отдельно.
+- **Плюсы:** Работает везде, не нужны права root.
+- **Минусы:** Нужно настраивать каждое приложение отдельно.
+- **Windows:** Автоматически — системный прокси устанавливается при включении bypass (v1.2.0+).
 
-### 4.2 Прозрачный прокси (Linux)
+### 5.2 Прозрачный прокси (Linux)
 
 Все TCP соединения автоматически перехватываются через iptables:
 
@@ -251,48 +500,42 @@ Bypass применяется только к доменам из списка �
 iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-ports 1081
 ```
 
-FreeNet слушает на порту 1081 и использует `SO_ORIGINAL_DST` для получения оригинального адреса назначения (до редиректа).
+FreeNet слушает на порту 1081 и использует `SO_ORIGINAL_DST` для получения оригинального
+адреса назначения (до редиректа).
 
-```go
-// transparent.go
-func getOriginalDst(conn net.Conn) (*net.TCPAddr, error) {
-    // SO_ORIGINAL_DST — специальный socket option Linux
-    // возвращает оригинальный dst перед iptables REDIRECT
-    raw, _ := conn.(*net.TCPConn).SyscallConn()
-    raw.Control(func(fd uintptr) {
-        mreq, _ = unix.GetsockoptIPv6Mreq(int(fd), unix.SOL_IP, SO_ORIGINAL_DST)
-    })
-    return mreq, nil
-}
-```
+### 5.3 Netfilter Queue (Linux, ядро)
 
-### 4.3 Netfilter Queue (Linux, ядро)
+**Файл:** `internal/proxy/nfqueue.go`
 
 Самый эффективный метод — перехват на уровне ядра:
 
 ```bash
-iptables -A OUTPUT -p tcp --dport 443 -j NFQUEUE --queue-num 0
+iptables -A OUTPUT -p tcp --dport 443 -j NFQUEUE --queue-num 200
 ```
 
-FreeNet получает пакеты через `go-nfqueue`, модифицирует их, возвращает обратно в ядро. Работает для ВСЕХ приложений без настройки SOCKS5.
+FreeNet получает пакеты через `go-nfqueue`, модифицирует их, возвращает обратно в ядро.
+Работает для ВСЕХ приложений без настройки SOCKS5. Требует `CAP_NET_ADMIN`.
 
-### 4.4 Android VpnService (Android)
+### 5.4 Android VpnService
 
 VpnService создаёт виртуальный TUN-интерфейс. Все приложения отправляют трафик через него:
 
 ```kotlin
 val builder = Builder()
 builder.addAddress("10.89.0.1", 24)
-builder.addRoute("0.0.0.0", 0)  // весь трафик
+builder.addRoute("0.0.0.0", 0)      // весь трафик через VPN
+builder.addDnsServer("8.8.8.8")     // DNS тоже через VPN (будет перехвачен DoH)
 builder.setSession("FreeNet")
-val tunFd = builder.establish()
+val tunFd = builder.establish()     // fd передаётся в Go через gomobile
 ```
 
-Go код (через gomobile) читает raw IP пакеты из TUN fd, разбирает TCP/IP заголовки, проксирует через SOCKS5 с bypass.
+Go код читает raw IPv4 пакеты из TUN fd:
+- **TCP пакеты** → TCP state machine → SOCKS5 bypass прокси
+- **UDP пакеты к порту 53** → DoH клиент → ответ инжектируется обратно в TUN
 
 ---
 
-## 5. SOCKS5 прокси
+## 6. SOCKS5 прокси
 
 **Файл:** `internal/proxy/socks5.go`
 
@@ -316,14 +559,14 @@ Go код (через gomobile) читает raw IP пакеты из TUN fd, р
 3. Разбор CONNECT запроса → target host:port
 4. Проверить hostlist (нужен ли bypass?)
 5. Dial к target
-6. Применить bypass стратегию к первому write()
+6. Применить bypass стратегию к первому write() (TLS ClientHello)
 7. io.Copy в обоих направлениях
 8. Статистика: bytes_in, bytes_out, bypassed/passthrough
 ```
 
 ---
 
-## 6. Веб-интерфейс
+## 7. Веб-интерфейс
 
 **Файл:** `internal/web/ui.go`
 
@@ -332,38 +575,37 @@ Go код (через gomobile) читает raw IP пакеты из TUN fd, р
 | Endpoint | Метод | Описание |
 |----------|-------|----------|
 | `/` | GET | Главная страница с кнопкой вкл/выкл |
-| `/downloads` | GET | Страница скачивания для всех платформ |
-| `/api/status` | GET | JSON: статус, стратегия, статистика |
+| `/download` | GET | Redirect → `/?tab=download` |
+| `/api/status` | GET | JSON: статус, стратегия, DoH, hostlist |
 | `/api/toggle` | POST | Вкл/Выкл bypass |
 | `/api/strategy` | POST | Изменить стратегию |
 | `/api/stats` | GET | JSON: bytes_in/out, connections |
+| `/api/autodetect` | POST | Запустить авто-определение стратегии |
 | `/ws/logs` | WebSocket | Поток логов в реальном времени |
 
-### WebSocket логи
+### Ответ `/api/status`
 
-```javascript
-// JavaScript на клиенте
-const ws = new WebSocket('ws://localhost:8080/ws/logs');
-ws.onmessage = (event) => {
-    logContainer.innerHTML += event.data + '\n';
-};
-```
-
-На сервере:
-```go
-// ring.go — кольцевой буфер с подписчиками
-func (r *Ring) Subscribe() <-chan Entry {
-    ch := make(chan Entry, 64)
-    r.mu.Lock()
-    r.subs = append(r.subs, ch)
-    r.mu.Unlock()
-    return ch
+```json
+{
+  "enabled": true,
+  "strategy": "auto",
+  "listen_addr": "127.0.0.1:1080",
+  "hostlist_size": 823041,
+  "dns_enabled": true,
+  "dns_queries": 5678,
+  "dns_errors": 0
 }
 ```
 
+### WebSocket логи
+
+Сервер пишет все `log.Printf()` в кольцевой буфер (`internal/logs/ring.go`).
+При подключении WebSocket клиент получает последние 100 строк, затем подписывается
+на новые через Go channel.
+
 ---
 
-## 7. Android архитектура
+## 8. Android архитектура
 
 ### Слои
 
@@ -384,18 +626,16 @@ func (r *Ring) Subscribe() <-chan Entry {
 ┌─────────────────────▼───────────────────────────────┐
 │  Go Core Layer (gomobile AAR)                       │
 │  mobile/engine.go                                   │
-│  - SOCKS5 bypass прокси                             │
-│  - Все стратегии из internal/bypass/                │
+│  - SOCKS5 bypass прокси (все стратегии)             │
 │  - FreenetEngine.StartVPN(tunFd, port, protector)   │
 └─────────────────────┬───────────────────────────────┘
-                      │ raw IPv4/TCP packets
+                      │ raw IPv4 packets
 ┌─────────────────────▼───────────────────────────────┐
-│  TUN Packet Forwarder                               │
-│  mobile/tun.go (Go) / PacketForwarder.kt (Kotlin)   │
-│  - Читает IPv4 пакеты из TUN fd                     │
-│  - Парсит TCP заголовки (SYN/ACK/FIN/RST/PSH)       │
-│  - Проксирует через SOCKS5 bypass                   │
-│  - Записывает ответы обратно в TUN                  │
+│  TUN Packet Forwarder + DNS Interceptor             │
+│  mobile/tun.go                                      │
+│  - TCP (proto=6): SOCKS5 bypass                     │
+│  - UDP:53 (proto=17): DoH inline resolution         │
+│  - Корректные IPv4/TCP/UDP checksums                │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -404,25 +644,21 @@ func (r *Ring) Subscribe() <-chan Entry {
 Функции Go, экспортируемые в Java/Kotlin:
 
 ```kotlin
-// Kotlin (после сборки AAR)
 val engine = Mobile.newFreenetEngine()
-engine.start(1080)                    // Int — SOCKS5 порт
-engine.setStrategy("auto")           // String
-engine.setBypassEnabled(true)        // Boolean
-engine.isRunning()                   // Boolean
-engine.getVersion()                  // String
-engine.getStats()                    // String (JSON)
-engine.getRecentLogs(50)             // String
-engine.startVPN(tunFd, 1080, prot)   // Long, Int, SocketProtector → error
-
-// Остановка
+engine.start(1080)                    // запуск SOCKS5 прокси
+engine.setStrategy("auto")           // стратегия bypass
+engine.setBypassEnabled(true)        // вкл/выкл bypass
+engine.isRunning()                   // статус
+engine.getVersion()                  // "1.3.0"
+engine.getStats()                    // JSON статистика
+engine.getRecentLogs(50)             // последние 50 строк лога
+engine.startVPN(tunFd, 1080, prot)   // блокирующий вызов: запуск TUN loop
 engine.stop()
 ```
 
 ### VpnService socket protection
 
-Чтобы трафик прокси (SOCKS5 соединения к реальным серверам) не попал снова в TUN
-(что привело бы к бесконечному циклу):
+Чтобы трафик прокси не попал снова в TUN (routing loop):
 
 ```kotlin
 class GoSocketProtector(private val svc: VpnService) : Mobile.SocketProtector {
@@ -430,37 +666,105 @@ class GoSocketProtector(private val svc: VpnService) : Mobile.SocketProtector {
 }
 ```
 
-На Go стороне каждый исходящий сокет помечается через `Protect(fd)` перед `connect()`.
+Каждый исходящий сокет (к реальному серверу через SOCKS5) помечается через `protect(fd)`
+до `connect()`. ОС исключает эти сокеты из VPN routing и отправляет трафик напрямую.
 
 ---
 
-## 8. Конфигурация
+## 9. Windows интеграция
+
+### 9.1 Системный трей
+
+**Файл:** `cmd/freenet/tray_windows.go`
+
+При запуске на Windows вместо консоли запускается системный трей через `github.com/getlantern/systray`.
+
+Меню трея:
+```
+[F] FreeNet (иконка)
+─────────────────────
+● Bypass включён        ← статус
+↗ Системный прокси: установлен
+─────────────────────
+  Выключить bypass      ← действие
+─────────────────────
+  Стратегия: auto
+    [✓] Auto
+    [ ] Split
+    [ ] TLS Record
+    [ ] Combined
+    [ ] Fake packets
+    [ ] QUIC bypass
+    [ ] Нет bypass
+─────────────────────
+  Открыть веб-интерфейс
+─────────────────────
+  Выйти из FreeNet
+```
+
+### 9.2 Автоматический системный прокси
+
+**Файл:** `internal/sysproxy/sysproxy_windows.go`
+
+При включении bypass FreeNet записывает настройки в реестр Windows:
+
+```
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
+  ProxyEnable  = 1 (DWORD)
+  ProxyServer  = "socks=127.0.0.1:1080"
+```
+
+При выключении — восстанавливает оригинальные значения.
+
+После изменения реестра отправляется системное сообщение `WM_SETTINGCHANGE` через
+`SendMessageTimeout(HWND_BROADCAST, ...)` — Chrome, Edge, Firefox подхватывают изменения
+без перезапуска.
+
+### 9.3 Windows Service
+
+**Файл:** `cmd/freenet/service_windows.go`
+
+```
+freenet.exe -install    → регистрирует как Windows Service
+freenet.exe -uninstall  → удаляет из служб
+```
+
+Служба запускается автоматически при загрузке Windows под аккаунтом `LocalSystem`.
+
+---
+
+## 10. Конфигурация
 
 ### Файл конфигурации (`config.yaml`)
 
 ```yaml
 proxy:
   listen_addr: "127.0.0.1:1080"       # SOCKS5
-  transparent_addr: "0.0.0.0:1081"   # Прозрачный прокси
-  web_addr: "0.0.0.0:8080"           # Веб UI
+  transparent_addr: ""                # Прозрачный прокси (пустое = выключен)
 
 bypass:
   strategy: "auto"    # auto | split | tlsrec | fake | combined | quic | none
-  enabled: true
-  split_pos: 2        # позиция split до SNI (байты от начала SNI)
-  fake_ttl: 4         # TTL для fake пакетов
-  md5_fake: false     # использовать MD5 checksum вместо TTL для fake
+  split_pos: 2        # позиция split до SNI (байты)
+  fake_ttl: 8         # TTL для fake пакетов (умирает до целевого сервера)
+  md5_fake: false     # bad checksum вместо TTL
 
 nfqueue:
-  enabled: false      # включить netfilter queue (требует root)
-  queue_num: 0
+  enabled: false      # netfilter queue (Linux, требует CAP_NET_ADMIN)
+  queue_num: 200
 
 hostlist:
   enabled: false
   path: "domains.lst"
   auto_update: true
-  update_url: "https://antifilter.download/list/domains.lst"
-  update_interval: "24h"
+  url: "https://antifilter.download/list/domains.lst"
+
+dns:
+  enabled: true
+  listen_addr: "127.0.0.1:5300"    # локальный DoH резолвер
+  servers:                          # DoH серверы (пустое = Cloudflare+Google+Quad9)
+    - "https://1.1.1.1/dns-query"
+    - "https://8.8.8.8/dns-query"
+    - "https://9.9.9.9/dns-query"
 ```
 
 ### CLI флаги
@@ -472,24 +776,13 @@ hostlist:
   -web string         Адрес веб UI (по умолчанию: :8080)
   -socks string       Адрес SOCKS5 (по умолчанию: :1080)
   -strategy string    Стратегия bypass (по умолчанию: auto)
-  -nfqueue            Включить nfqueue режим
   -install            Установить как Windows Service
   -uninstall          Удалить Windows Service
 ```
 
-### Переменные окружения (Docker)
-
-```bash
-FREENET_STRATEGY=auto          # стратегия bypass
-FREENET_WEB_ADDR=:8080         # порт веб UI
-FREENET_SOCKS_ADDR=:1080       # порт SOCKS5
-FREENET_TRANSPARENT=true       # включить прозрачный прокси
-FREENET_NFQUEUE=false          # включить nfqueue
-```
-
 ---
 
-## 9. Сборка и деплой
+## 11. Сборка и деплой
 
 ### Требования
 
@@ -508,16 +801,19 @@ FREENET_NFQUEUE=false          # включить nfqueue
 cd go-freenet
 docker compose up -d
 
-# Конфигурация через env
-FREENET_STRATEGY=combined docker compose up -d
-
 # Логи
 docker compose logs -f freenet
+
+# Веб UI доступен на http://localhost:8080
+# SOCKS5 на 127.0.0.1:1080
+# DoH резолвер на 127.0.0.1:5300
 ```
 
 **Dockerfile** использует multi-stage build:
 - Stage 1: `golang:1.26` — компиляция бинарника
 - Stage 2: `debian:bookworm-slim` — финальный образ (~15 MB)
+
+Docker контейнер имеет `cap_add: [NET_ADMIN, NET_RAW]` для fake packets и transparent proxy.
 
 ### Linux (systemd)
 
@@ -530,20 +826,24 @@ sudo bash scripts/install.sh
 
 sudo systemctl status freenet
 journalctl -u freenet -f
+
+# Для fake packets (raw socket)
+sudo setcap cap_net_raw+ep /usr/local/bin/freenet
 ```
 
 ### Windows (служба)
 
 ```powershell
-# Установить как Windows Service
+# Установить как Windows Service (запускается автоматически при загрузке)
 .\freenet-windows-amd64.exe -install
 
-# Или через PowerShell one-liner (скачивает и устанавливает)
+# Или PowerShell one-liner (скачивает и устанавливает)
 irm https://github.com/mintfary-oss/zapret2-may/releases/latest/download/install-windows.ps1 | iex
 
 # Управление
 Start-Service FreeNet
 Stop-Service FreeNet
+Get-Service FreeNet
 ```
 
 ### Android
@@ -564,7 +864,7 @@ bash scripts/build-android.sh
 
 ---
 
-## 10. CI/CD Pipeline
+## 12. CI/CD Pipeline
 
 **Файл:** `.github/workflows/freenet.yml`
 
@@ -593,6 +893,13 @@ Lint (go vet + gofmt)
     └──▶ Android APK (gomobile + Gradle)
               │
               └──▶ (только при tag) Create GitHub Release
+                   ├── freenet-android.apk
+                   ├── freenet-windows-amd64.exe
+                   ├── freenet-linux-{amd64,arm64,armv7}
+                   ├── freenet-linux-amd64-installer.tar.gz
+                   ├── install.sh
+                   ├── install-windows.ps1
+                   └── mobile.aar
 ```
 
 ### Создание нового релиза
@@ -602,44 +909,55 @@ Lint (go vet + gofmt)
 git log master --oneline -5
 
 # 2. Создать тег
-git tag freenet-v1.1.0
-git push origin freenet-v1.1.0
+git tag freenet-v1.4.0
+git push origin freenet-v1.4.0
 
 # GitHub Actions автоматически:
-# - Запускает все 5 jobs
+# - Запускает все jobs (~5-8 минут)
 # - Собирает 4 платформы + Android APK
 # - Создаёт GitHub Release с 9 артефактами
-# - Публикует ссылки для скачивания
+# - Публикует страницу релиза с ссылками
 ```
 
 ---
 
-## 11. Безопасность
+## 13. Безопасность
 
 ### Сетевая безопасность
 
 - SOCKS5 по умолчанию слушает только `127.0.0.1` — недоступен с других устройств
-- Веб UI по умолчанию слушает `0.0.0.0:8080` — **смените на** `127.0.0.1:8080` если не нужен доступ из локальной сети
+- DoH резолвер слушает только `127.0.0.1:5300` — только локальное использование
+- Веб UI по умолчанию слушает `0.0.0.0:8080` — при необходимости сменить на `127.0.0.1:8080`
 
 ### Android безопасность
 
 - VpnService API — официальный Android механизм, не требует root
-- Приложение видит все пакеты через TUN интерфейс
-- Socket protection предотвращает routing loop
+- Socket protection предотвращает routing loop (весь bypass-трафик идёт мимо TUN)
 - Foreground Service + уведомление — пользователь всегда знает что VPN активен
+- DNS защита: все DNS запросы перехватываются и резолвятся через DoH — ни один запрос не уходит открыто к провайдеру
 
 ### Fake packets и привилегии
 
 - `fake` стратегия требует `CAP_NET_RAW`
 - В Docker: `cap_add: [NET_ADMIN, NET_RAW]`
 - В Linux: `sudo setcap cap_net_raw+ep /usr/local/bin/freenet`
-- Без привилегий стратегия fallback на `split`
+- Без привилегий стратегия автоматически fallback на `split`
+
+### Приватность DNS
+
+| Метод | Что видит провайдер |
+|-------|---------------------|
+| Обычный DNS (UDP:53) | Все запросы в открытом виде |
+| DNS-over-TLS (DoT) | Зашифровано, но DoT-трафик виден на порту 853 |
+| DNS-over-HTTPS (DoH) | Только HTTPS соединение к 1.1.1.1/8.8.8.8/9.9.9.9 |
+
+FreeNet использует DoH — максимальная приватность DNS без изменения сетевых настроек ОС.
 
 ### Что FreeNet НЕ делает
 
-- Не шифрует трафик (это не VPN)
-- Не скрывает IP-адрес пользователя
-- Не защищает от трекинга или слежки
+- Не шифрует сам интернет-трафик (это не VPN)
+- Не скрывает IP-адрес пользователя от целевых сайтов
+- Не защищает от трекинга или cookies
 - Не обходит авторизацию на сайтах
 
-FreeNet только помогает установить соединение с заблокированным ресурсом, обходя DPI блокировку по SNI.
+FreeNet только помогает установить соединение с заблокированным ресурсом, обходя DPI-блокировку по SNI и DNS-подмену.

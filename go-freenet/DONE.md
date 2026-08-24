@@ -11,7 +11,9 @@ go-freenet/
 ├── cmd/freenet/
 │   ├── main.go                       # точка входа, CLI флаги
 │   ├── service_stub.go               # заглушка для не-Windows
-│   └── service_windows.go            # Windows Service (Install/Uninstall)
+│   ├── service_windows.go            # Windows Service (Install/Uninstall)
+│   ├── tray_windows.go               # системный трей (Windows)
+│   └── tray_stub.go                  # заглушка трея (Linux/macOS)
 ├── internal/
 │   ├── bypass/
 │   │   ├── engine.go                 # выбор и запуск стратегии обхода DPI
@@ -26,24 +28,31 @@ go-freenet/
 │   │   ├── autodetect.go             # авто-подбор стратегии под провайдера
 │   │   └── hostlist.go               # фильтрация по доменам (antizapret)
 │   ├── config/
-│   │   └── config.go                 # YAML конфигурация
+│   │   └── config.go                 # YAML конфигурация (incl. DNSConfig)
+│   ├── dns/
+│   │   ├── doh.go                    # DoH-клиент RFC 8484 + HTTP-клиент фабрика
+│   │   └── resolver.go               # локальный UDP→DoH резолвер (127.0.0.1:5300)
 │   ├── logs/
 │   │   └── ring.go                   # кольцевой буфер логов + WebSocket pub
 │   ├── proxy/
-│   │   ├── server.go                 # управление сервером, lifecycle
+│   │   ├── server.go                 # управление сервером, lifecycle (+ DoH start)
 │   │   ├── socks5.go                 # SOCKS5 прокси (RFC 1928), полный
 │   │   ├── transparent.go            # прозрачный прокси, iptables REDIRECT
 │   │   ├── transparent_stub.go       # заглушка (Windows/macOS)
 │   │   ├── nfqueue.go                # netfilter queue (Linux, ядро)
 │   │   ├── nfqueue_stub.go           # заглушка (не-Linux)
 │   │   └── stats.go                  # статистика соединений (атомарные)
+│   ├── sysproxy/
+│   │   ├── sysproxy_windows.go       # реестр: set/restore системного прокси
+│   │   ├── sysproxy_stub.go          # заглушка (не-Windows)
+│   │   └── notify_windows.go         # WM_SETTINGCHANGE broadcast
 │   ├── types/
 │   │   └── types.go                  # общие структуры (StatsSnapshot, etc.)
 │   └── web/
-│       └── ui.go                     # веб-UI + WebSocket логи в реальном времени
+│       └── ui.go                     # веб-UI + WebSocket логи + DoH статус
 ├── mobile/                           # gomobile-bindable API (публичный пакет)
 │   ├── engine.go                     # FreenetEngine — SOCKS5 + VPN API
-│   └── tun.go                        # IPv4/TCP TUN packet forwarder
+│   └── tun.go                        # IPv4/TCP TUN + UDP DNS→DoH перехват
 ├── android/                          # Android Studio проект
 │   ├── app/src/main/
 │   │   ├── AndroidManifest.xml       # разрешения VpnService
@@ -99,6 +108,20 @@ go-freenet/
 
 ---
 
+## Реализованная DNS защита
+
+| Компонент | Что делает |
+|-----------|-----------|
+| `internal/dns/doh.go` | DoH-клиент RFC 8484: POST `application/dns-message` к 1.1.1.1/8.8.8.8/9.9.9.9 |
+| `internal/dns/resolver.go` | UDP резолвер на `127.0.0.1:5300`, форвардирует запросы через DoH |
+| `mobile/tun.go` | Android TUN перехватывает UDP порт 53, резолвит напрямую через DoH |
+| `internal/bypass/hostlist.go` | Загрузка списков через DoH-aware `*http.Client` |
+| `internal/proxy/server.go` | Запускает DoH резолвер при старте, передаёт его в hostlist |
+| `internal/web/ui.go` | `🔒 DNS-over-HTTPS активен · запросов: N` в веб UI |
+| `internal/config/config.go` | `dns.enabled`, `dns.listen_addr`, `dns.servers` в конфиге |
+
+---
+
 ## Платформы и артефакты
 
 | Платформа | Файл | Способ установки |
@@ -137,8 +160,9 @@ Jobs:
 ```bash
 # Docker (рекомендуется)
 cd go-freenet && docker compose up -d
-# → http://localhost:8080  (веб UI с большой кнопкой)
+# → http://localhost:8080  (веб UI с большой кнопкой и статусом DoH)
 # → 127.0.0.1:1080        (SOCKS5 прокси)
+# → 127.0.0.1:5300        (локальный DoH резолвер, UDP)
 
 # Linux напрямую
 go build -o freenet ./cmd/freenet && ./freenet -web :8080
@@ -158,9 +182,11 @@ bash scripts/build-release-apk.sh
 ## Зависимости
 
 | Пакет | Версия | Назначение |
-|-------|--------|-----------|
+|-------|--------|-----------| 
 | `github.com/gorilla/websocket` | v1.5.3 | WebSocket для логов |
 | `github.com/florianl/go-nfqueue/v2` | v2.1.0 | Netfilter queue (Linux) |
 | `golang.org/x/sys` | v0.47.0 | Системные вызовы (unix/windows) |
+| `golang.org/x/net` | v0.58.0 | `dns/dnsmessage` для DoH wire format |
 | `golang.org/x/mobile` | v0.0.0-20260821 | gomobile для Android |
 | `gopkg.in/yaml.v3` | v3.0.1 | YAML конфигурация |
+| `github.com/getlantern/systray` | v1.2.2 | Системный трей Windows/Linux |

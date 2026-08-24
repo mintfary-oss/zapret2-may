@@ -199,9 +199,6 @@ val isFin = (fi and FLAG_FIN) != 0
 относительно `$GITHUB_WORKSPACE` (корень репозитория), игнорируя `defaults.run.working-directory`.
 Файлы находились в `go-freenet/dist/`, а workflow искал в `dist/`.
 
-**Диагностика:** Команда `ls -lh dist/` (которая выполняется в `go-freenet/`) показывала
-все файлы (86 MB), но action не видел их из-за разницы в базовых директориях.
-
 **Исправление:** Изменён путь в `files:`:
 ```yaml
 # До:
@@ -215,6 +212,30 @@ files: go-freenet/dist/*
 
 ---
 
+### ERR-CI-05: `Go 1.26 requires golang.org/x/mobile as tool dependency`
+
+**Workflow job:** Android APK → Build Android AAR (gomobile init)
+
+**Ошибка:**
+```
+go: golang.org/x/mobile: module lookup disabled by GONOSUMDB or GOFLAGS
+```
+
+**Причина:** Go 1.26 требует явного указания gomobile в секции `tool` файла `go.mod`
+перед выполнением `gomobile init`. Без этого `go tool gomobile` не находится.
+
+**Исправление:** Добавлена секция `tool` в `go.mod`:
+```go
+tool (
+    golang.org/x/mobile/cmd/gobind
+    golang.org/x/mobile/cmd/gomobile
+)
+```
+
+**Коммит:** `fix(android): add golang.org/x/mobile as go.mod tool dependency for Go 1.26`
+
+---
+
 ## Статистика ошибок
 
 | Категория | Количество | Статус |
@@ -222,5 +243,5 @@ files: go-freenet/dist/*
 | Ошибки компиляции Go | 3 | ✅ Исправлены |
 | Ошибки аутентификации | 2 | ✅ Исправлены |
 | Ограничения реализации | 2 | 🔄 В плане |
-| Ошибки CI/CD | 4 | ✅ Исправлены |
-| **Итого** | **11** | |
+| Ошибки CI/CD | 5 | ✅ Исправлены |
+| **Итого** | **12** | |

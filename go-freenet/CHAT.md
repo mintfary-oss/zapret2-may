@@ -104,28 +104,86 @@
 
 ---
 
-### 8. Итоговый результат
+### 8. Windows GUI — системный трей (ЗАВЕРШЕНА v1.1.0)
 
-**Релиз freenet-v1.0.5** опубликован: https://github.com/mintfary-oss/zapret2-may/releases/tag/freenet-v1.0.5
+**Пользователь:** "Дальше" (продолжить с готовностью ~75%)
 
-Все платформы собираются автоматически при `git tag freenet-vX.Y.Z`:
-
-| Файл | Платформа | Размер |
-|------|-----------|--------|
-| `freenet-android.apk` | Android | ~37 MB |
-| `freenet-windows-amd64.exe` | Windows | ~7 MB |
-| `freenet-linux-amd64` | Linux x64 | ~7 MB |
-| `freenet-linux-arm64` | Linux ARM64 | ~7 MB |
-| `freenet-linux-armv7` | Raspberry Pi | ~7 MB |
-| `freenet-linux-amd64-installer.tar.gz` | Linux bundle | ~3 MB |
-| `install.sh` | Linux one-liner | — |
-| `install-windows.ps1` | Windows one-liner | — |
-| `mobile.aar` | Android AAR (разработчикам) | ~15 MB |
+**Neo:** Phase 4 — Windows системный трей:
+- `cmd/freenet/tray_windows.go` — иконка в трее, меню с выбором стратегии
+- `cmd/freenet/tray_stub.go` — заглушка для Linux/macOS
+- Вместо чёрной консоли — иконка в трее с меню "Включить/Выключить bypass"
+- Пункты меню: статус, выбор стратегии, "Открыть веб-интерфейс"
+- Релиз `freenet-v1.1.0` опубликован
 
 ---
 
-### 9. Важное: токены GitHub
+### 9. Windows системный прокси (ЗАВЕРШЕНА v1.2.0)
 
-В ходе сессии пользователь три раза публиковал GitHub токены в открытом чате.
+**Пользователь:** "Дальше"
+
+**Neo:** Автоматическая установка системного прокси Windows:
+- `internal/sysproxy/sysproxy_windows.go` — запись в реестр `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
+- При включении bypass → Chrome, Edge, Firefox подхватывают SOCKS5 автоматически
+- При выключении → настройки восстанавливаются
+- `sysproxy.Restore()` при завершении процесса
+- Бродкаст `WM_SETTINGCHANGE` — браузеры реагируют без перезапуска
+- Релиз `freenet-v1.2.0` опубликован
+
+---
+
+### 10. DNS-over-HTTPS защита (ЗАВЕРШЕНА v1.3.0)
+
+**Пользователь:** "Дальше"
+
+**Neo:** Phase 4 — DNS-over-HTTPS (DoH):
+
+Проблема: Российские провайдеры блокируют не только по SNI (DPI), но и подменяют DNS-ответы.
+Даже если bypass DPI работает, DNS может вернуть неправильный IP.
+
+Решение:
+- `internal/dns/doh.go` — DoH-клиент по RFC 8484, использует 1.1.1.1/8.8.8.8/9.9.9.9
+- `internal/dns/resolver.go` — локальный UDP резолвер на `127.0.0.1:5300`, форвардирует запросы через DoH
+- `mobile/tun.go` — Android TUN перехватывает UDP порт 53, резолвит через DoH (без UDP резолвера)
+- `internal/bypass/hostlist.go` — загрузка списков доменов через DoH-aware HTTP-клиент
+- `internal/proxy/server.go` — запуск DoH резолвера при старте сервера
+- `internal/web/ui.go` — статус DoH в веб-интерфейсе: `🔒 DNS-over-HTTPS активен`
+
+Результат: провайдер не может подменить DNS ни на десктопе, ни на Android.
+Релиз `freenet-v1.3.0` опубликован.
+
+---
+
+### 11. Итоговый результат
+
+**Текущий релиз: freenet-v1.3.0**
+https://github.com/mintfary-oss/zapret2-may/releases/tag/freenet-v1.3.0
+
+Все платформы собираются автоматически при `git tag freenet-vX.Y.Z`:
+
+| Файл | Платформа | Что делает |
+|------|-----------|-----------|
+| `freenet-android.apk` | Android | VPN без root, перехват всего трафика + DoH |
+| `freenet-windows-amd64.exe` | Windows | Служба + трей + автопрокси + DoH |
+| `freenet-linux-amd64` | Linux x64 | systemd сервис + Docker |
+| `freenet-linux-arm64` | Linux ARM64 | Raspberry Pi / VPS |
+| `freenet-linux-armv7` | Linux ARMv7 | Роутеры |
+| `freenet-linux-amd64-installer.tar.gz` | Linux bundle | Скачал, `sudo bash install.sh` |
+| `install.sh` | Linux | `curl … | sudo bash` |
+| `install-windows.ps1` | Windows | `irm … | iex` |
+| `mobile.aar` | Android AAR | Для разработчиков |
+
+**Готовность приложения: ~90%**
+
+Оставшиеся задачи:
+- WinDivert (автоперехват всего трафика на Windows без настройки SOCKS5)
+- ECH (Encrypted Client Hello) — полная защита SNI в TLS 1.3
+- Unit-тесты
+- Android: полноценный tun2socks (IPv6, UDP), per-app фильтрация
+
+---
+
+### 12. Важное: токены GitHub
+
+В ходе сессии пользователь несколько раз публиковал GitHub токены в открытом чате.
 Все использованные токены необходимо немедленно отозвать:
 https://github.com/settings/tokens
