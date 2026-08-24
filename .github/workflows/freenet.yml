@@ -160,11 +160,77 @@ jobs:
           path: go-freenet/dist/freenet-linux-amd64-installer.tar.gz
           retention-days: 30
 
+  # ── Windows bundle with WinDivert ──────────────────────────────────────────
+  # Bundles freenet.exe + WinDivert DLL/SYS into a ready-to-run ZIP.
+  # WinDivert 2.4 enables kernel-level transparent interception of all
+  # applications — no SOCKS5 configuration needed on the client side.
+  package-windows:
+    name: Package Windows bundle (+ WinDivert)
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      WINDIVERT_VERSION: "2.4.5"
+      WINDIVERT_RELEASE: "WinDivert-2.4.5-A"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: freenet-windows-amd64.exe
+          path: go-freenet/dist/
+
+      - name: Download WinDivert
+        run: |
+          curl -fsSL -o /tmp/windivert.zip \
+            "https://github.com/basil00/WinDivert/releases/download/v${WINDIVERT_VERSION}/${WINDIVERT_RELEASE}.zip"
+          unzip -q /tmp/windivert.zip -d /tmp/windivert/
+
+      - name: Create Windows bundle ZIP
+        run: |
+          mkdir -p bundle
+          # Executable
+          cp dist/freenet-windows-amd64.exe bundle/freenet.exe
+          # WinDivert x64 kernel driver files
+          cp /tmp/windivert/${WINDIVERT_RELEASE}/x64/WinDivert.dll   bundle/WinDivert.dll
+          cp /tmp/windivert/${WINDIVERT_RELEASE}/x64/WinDivert64.sys bundle/WinDivert64.sys
+          # Quick-start README
+          cat > bundle/README.txt <<'EOF'
+          FreeNet — обход блокировок для Windows
+          =======================================
+
+          Установка (рекомендуется):
+            Запустить от Администратора:  freenet.exe -install
+            → FreeNet устанавливается как служба и запускается автоматически.
+            → Появляется иконка в системном трее.
+            → WinDivert перехватывает ВЕСЬ трафик — все приложения работают.
+
+          Запуск вручную (без установки):
+            freenet.exe
+            → Открыть http://localhost:8080 для управления.
+
+          Удаление:
+            freenet.exe -uninstall
+
+          Файлы:
+            freenet.exe        — основная программа
+            WinDivert.dll      — драйвер перехвата трафика (обязателен)
+            WinDivert64.sys    — системный драйвер WinDivert (обязателен)
+
+          Все три файла должны находиться в одной папке.
+          EOF
+          cd bundle && zip -r ../dist/freenet-windows-bundle.zip .
+          echo "Bundle contents:"; unzip -l ../dist/freenet-windows-bundle.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freenet-windows-bundle
+          path: go-freenet/dist/freenet-windows-bundle.zip
+          retention-days: 30
+
   # ── GitHub Release (runs only on v* tag push) ──────────────────────────────
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build, android, package-linux]
+    needs: [build, android, package-linux, package-windows]
     if: startsWith(github.ref, 'refs/tags/freenet-v')
     permissions:
       contents: write
@@ -199,11 +265,15 @@ jobs:
             **🤖 Android** — скачай APK и установи (включи «Установка из неизвестных источников»):
             👉 **[freenet-android.apk](https://github.com/${{ github.repository }}/releases/latest/download/freenet-android.apk)**
 
-            **🪟 Windows** — PowerShell от Администратора:
+            **🪟 Windows** — скачать ZIP (WinDivert уже внутри):
+            👉 **[freenet-windows-bundle.zip](https://github.com/${{ github.repository }}/releases/latest/download/freenet-windows-bundle.zip)**
+            Распакуй → запусти от Администратора: `freenet.exe -install`
+            WinDivert автоматически перехватит трафик ВСЕХ приложений.
+
+            Или PowerShell one-liner от Администратора:
             ```powershell
             irm https://github.com/${{ github.repository }}/releases/latest/download/install-windows.ps1 | iex
             ```
-            Или скачай `freenet-windows-amd64.exe` и запусти: `freenet-windows-amd64.exe -install`
 
             **🐧 Linux** — одна команда:
             ```bash
@@ -220,8 +290,9 @@ jobs:
             | Платформа | Файл | Инструкция |
             |-----------|------|------------|
             | 🤖 Android | `freenet-android.apk` | Скачать → установить APK |
+            | 🪟 Windows (рекомендуется) | `freenet-windows-bundle.zip` | Распаковать → `freenet.exe -install` (от Администратора) |
             | 🪟 Windows (авто) | `install-windows.ps1` | PowerShell one-liner |
-            | 🪟 Windows (вручную) | `freenet-windows-amd64.exe` | Запустить `-install` |
+            | 🪟 Windows (exe без WinDivert) | `freenet-windows-amd64.exe` | Только SOCKS5 режим |
             | 🐧 Linux bundle | `freenet-linux-amd64-installer.tar.gz` | Распаковать → `sudo bash install.sh` |
             | 🐧 Linux one-liner | `install.sh` | `curl … | sudo bash` |
             | 🐧 Linux amd64 | `freenet-linux-amd64` | Bare binary |

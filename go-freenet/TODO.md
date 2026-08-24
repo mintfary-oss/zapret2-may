@@ -9,8 +9,8 @@
 | 3 | Android APK (gomobile + VpnService) | ✅ Завершена |
 | 4 | DNS-over-HTTPS (DoH) защита | ✅ Завершена |
 | 5 | ECH + unit tests | ✅ Завершена |
-| 6 | Windows WinDivert | 🔄 Следующая |
-| 7 | Android улучшения (IPv6/UDP, per-app) | 📋 В плане |
+| 6 | Windows WinDivert | ✅ Завершена |
+| 7 | Android улучшения (IPv6/UDP, per-app) | 🔄 Следующая |
 
 ---
 

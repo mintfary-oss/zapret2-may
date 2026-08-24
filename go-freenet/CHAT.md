@@ -212,7 +212,44 @@ https://github.com/mintfary-oss/zapret2-may/releases/tag/freenet-v1.3.0
 
 ---
 
-### 12. Важное: токены GitHub
+### 12. Phase 6 — Windows WinDivert (ЗАВЕРШЕНА v1.5.0)
+
+**Пользователь:** "Дальше"
+
+**Neo:** Phase 6 — WinDivert: прозрачный перехват ВСЕГО трафика на Windows без настройки прокси.
+
+**Проблема до v1.5.0:**
+- FreeNet на Windows работал через SOCKS5 + системный прокси (реестр)
+- Chrome/Edge подхватывали прокси автоматически
+- Но Telegram, Steam, игры, другие приложения — не работали (не читают системный прокси)
+- Требовалась ручная настройка SOCKS5 в каждом приложении
+
+**Что изменилось в v1.5.0:**
+- Запустил `freenet.exe` → ВСЕ приложения сразу работают (Telegram, Steam, браузер, игры)
+- WinDivert перехватывает все исходящие TCP-пакеты на порт 443 на уровне ядра
+- Применяет DPI bypass (split/tlsrec/combined) прямо в пакетах
+- Пользователь не настраивает ничего
+
+**Что реализовано:**
+- `internal/windivert/windivert.go` — пакет-заголовок
+- `internal/windivert/windivert_windows.go` — загрузчик WinDivert.dll через `syscall.NewLazyDLL` (без CGO); перехват пакетов; парсинг TLS ClientHello; TCP split на позиции SNI; поддержка ECH passthrough
+- `internal/windivert/windivert_stub.go` — заглушка для Linux/macOS
+- `cmd/freenet/windivert_windows.go` — управление жизненным циклом (start/stop/restart при смене стратегии)
+- `cmd/freenet/windivert_stub.go` — заглушка для Linux
+- `cmd/freenet/tray_windows.go` — обновлён: статус `⚡ WinDivert: активен (все приложения)` в трее; WinDivert стартует вместе с bypass
+- `.github/workflows/freenet.yml` — новый job `package-windows`: скачивает WinDivert 2.4.5, создаёт ZIP-бандл `freenet-windows-bundle.zip` (freenet.exe + WinDivert.dll + WinDivert64.sys)
+- `scripts/install-windows.ps1` — обновлён: скачивает bundle ZIP вместо bare exe; извлекает все файлы
+
+**Архитектура без CGO:**
+WinDivert.dll загружается через `syscall.NewLazyDLL("WinDivert.dll")` — не нужен CGO,
+код кросс-компилируется с Linux на Windows без изменений (`GOOS=windows go build`).
+
+**Результат:** Релиз `freenet-v1.5.0` содержит `freenet-windows-bundle.zip`:
+распаковал → `freenet.exe -install` → всё работает.
+
+---
+
+### 13. Важное: токены GitHub
 
 В ходе сессии пользователь несколько раз публиковал GitHub токены в открытом чате.
 Все использованные токены необходимо немедленно отозвать:

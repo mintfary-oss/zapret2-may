@@ -8,10 +8,11 @@
 #   .\install-windows.ps1
 #
 # What it does:
-#   1. Downloads freenet-windows-amd64.exe from the latest GitHub Release
-#   2. Installs it to C:\Program Files\FreeNet\freenet.exe
-#   3. Registers it as a Windows service (auto-start)
-#   4. Opens http://localhost:8080 in the default browser
+#   1. Downloads freenet-windows-bundle.zip (freenet.exe + WinDivert.dll + WinDivert64.sys)
+#   2. Installs all files to C:\Program Files\FreeNet\
+#   3. Registers FreeNet as a Windows service (auto-start)
+#   4. WinDivert intercepts ALL application traffic automatically (no proxy config needed)
+#   5. Opens http://localhost:8080 in the default browser
 
 param(
     [string]$InstallDir  = "C:\Program Files\FreeNet",
@@ -22,7 +23,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $GithubRepo  = "mintfary-oss/zapret2-may"
-$BinaryUrl   = "https://github.com/$GithubRepo/releases/latest/download/freenet-windows-amd64.exe"
+$BundleUrl   = "https://github.com/$GithubRepo/releases/latest/download/freenet-windows-bundle.zip"
 $BinaryPath  = Join-Path $InstallDir "freenet.exe"
 $ServiceName = "FreeNet"
 
@@ -63,37 +64,45 @@ if ($Uninstall) {
     exit 0
 }
 
-# ── Download ──────────────────────────────────────────────────────────────────
+# ── Download bundle ───────────────────────────────────────────────────────────
 
-Write-Step "Downloading FreeNet"
-Write-Ok "Source: $BinaryUrl"
+Write-Step "Downloading FreeNet (bundle with WinDivert)"
+Write-Ok "Source: $BundleUrl"
 
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir | Out-Null
 }
 
-$tmpPath = Join-Path $env:TEMP "freenet.exe"
+$tmpZip = Join-Path $env:TEMP "freenet-bundle.zip"
+$tmpDir = Join-Path $env:TEMP "freenet-bundle"
 try {
-    Invoke-WebRequest -Uri $BinaryUrl -OutFile $tmpPath -UseBasicParsing
-    Write-Ok "Downloaded → $tmpPath"
+    Invoke-WebRequest -Uri $BundleUrl -OutFile $tmpZip -UseBasicParsing
+    Write-Ok "Downloaded → $tmpZip"
 } catch {
     Write-Err "Download failed: $_"
 }
 
-# ── Install binary ────────────────────────────────────────────────────────────
+# ── Extract bundle ────────────────────────────────────────────────────────────
 
-Write-Step "Installing binary"
+Write-Step "Extracting bundle"
 
-# Stop existing service if running.
+# Stop existing service before replacing files.
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($svc -and $svc.Status -eq "Running") {
     Stop-Service -Name $ServiceName -Force
     Start-Sleep -Seconds 2
 }
 
-Copy-Item -Force $tmpPath $BinaryPath
-Remove-Item -Force $tmpPath
-Write-Ok "Installed → $BinaryPath"
+if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
+Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
+Remove-Item -Force $tmpZip
+
+# Copy all bundle files (freenet.exe, WinDivert.dll, WinDivert64.sys).
+Get-ChildItem -Path $tmpDir -File | ForEach-Object {
+    Copy-Item -Force $_.FullName $InstallDir
+    Write-Ok "Installed → $(Join-Path $InstallDir $_.Name)"
+}
+Remove-Item -Recurse -Force $tmpDir
 
 # ── Write default config ──────────────────────────────────────────────────────
 

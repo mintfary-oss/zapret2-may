@@ -23,6 +23,7 @@ import (
 	"github.com/mintfary-oss/freenet/internal/config"
 	"github.com/mintfary-oss/freenet/internal/proxy"
 	"github.com/mintfary-oss/freenet/internal/web"
+	"github.com/mintfary-oss/freenet/internal/windivert"
 )
 
 //go:embed icon.png
@@ -54,11 +55,18 @@ func trayOnReady(webAddr string, srv *proxy.Server) {
 	systray.SetIcon(iconData)
 	systray.SetTooltip("FreeNet — Обход блокировок / DPI bypass")
 
+	// Start WinDivert at launch if bypass is enabled by default.
+	if srv.Enabled() {
+		startWinDivert(srv.Strategy())
+	}
+
 	// ── Status labels (non-clickable) ────────────────────────────────────────
 	mStatus := systray.AddMenuItem(statusLabel(srv.Enabled()), "Текущее состояние bypass")
 	mStatus.Disable()
 	mProxyStatus := systray.AddMenuItem(proxyStatusLabel(srv.Enabled()), "Системный прокси Windows")
 	mProxyStatus.Disable()
+	mWDStatus := systray.AddMenuItem(wdStatusLabel(), "Перехват трафика на уровне ядра (WinDivert)")
+	mWDStatus.Disable()
 	systray.AddSeparator()
 
 	// ── Toggle bypass ─────────────────────────────────────────────────────────
@@ -102,9 +110,15 @@ func trayOnReady(webAddr string, srv *proxy.Server) {
 		for range mToggle.ClickedCh {
 			next := !srv.Enabled()
 			srv.SetEnabled(next) // also calls sysproxy.Set / sysproxy.Restore
+			if next {
+				startWinDivert(srv.Strategy())
+			} else {
+				stopWinDivert()
+			}
 			mToggle.SetTitle(toggleLabel(next))
 			mStatus.SetTitle(statusLabel(next))
 			mProxyStatus.SetTitle(proxyStatusLabel(next))
+			mWDStatus.SetTitle(wdStatusLabel())
 		}
 	}()
 
@@ -115,7 +129,13 @@ func trayOnReady(webAddr string, srv *proxy.Server) {
 			for range item.ClickedCh {
 				id := strategies[i].id
 				srv.SetStrategy(id)
+				// If WinDivert is active, restart it with the new strategy so
+				// kernel-level bypass reflects the change immediately.
+				if winDivertRunning() {
+					restartWinDivert(id)
+				}
 				mStratLabel.SetTitle(stratLabel(id))
+				mWDStatus.SetTitle(wdStatusLabel())
 				for j, mi := range stratItems {
 					if j == i {
 						mi.Check()
@@ -166,6 +186,16 @@ func proxyStatusLabel(enabled bool) string {
 		return "↗ Системный прокси: установлен"
 	}
 	return "↗ Системный прокси: снят"
+}
+
+func wdStatusLabel() string {
+	if winDivertRunning() {
+		return "⚡ WinDivert: активен (все приложения)"
+	}
+	if windivert.Available() {
+		return "○ WinDivert: остановлен"
+	}
+	return "○ WinDivert: dll не найден (SOCKS5 активен)"
 }
 
 // waitForSignal blocks until SIGINT or SIGTERM, then gracefully stops the
