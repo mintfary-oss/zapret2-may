@@ -1,0 +1,14 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# Generated gomobile AAR — built locally via scripts/build-android.sh.
+# Not tracked in git; each developer builds it from source.
+app/libs/mobile.aar
+app/libs/mobile-sources.jar

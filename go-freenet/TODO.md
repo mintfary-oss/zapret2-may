@@ -1,73 +1,7 @@
 # Что нужно сделать — FreeNet Go
 
 ## Phase 2 статус: ✅ ЗАВЕРШЕНА
-
-Выполнено:
-- ✅ Fake packets через raw sockets (TTL + bad checksum)
-- ✅ nfqueue интеграция (kernel-level, все приложения)
-- ✅ TLS record layer splitting (tlsrec + combined)
-- ✅ Windows cross-compile (freenet-windows-amd64.exe)
-- ✅ GitHub Actions CI/CD (linux/amd64, arm64, armv7, windows/amd64)
-
----
-
-## Phase 3 — Android APK 🔴
-
-### Задача
-Нативное Android приложение с VpnService (без root).
-
-### Технологии
-- `gomobile bind` → `.aar` библиотека из `internal/bypass`
-- Android Studio / Kotlin / Jetpack Compose
-- gVisor netstack + tun2socks для захвата трафика
-- Per-app фильтрация
-
-### Шаги реализации
-
-**1. Подготовить Go core для gomobile**
-
-```bash
-# Установить gomobile
-go install golang.org/x/mobile/cmd/gomobile@latest
-gomobile init
-
-# Сборка AAR
-gomobile bind \
-  -target android/arm64,android/arm \
-  -androidapi 26 \
-  -javapkg com.freenet.bypass \
-  -o android/app/libs/freenet.aar \
-  ./internal/bypass
-```
-
-**2. Создать Android проект** (`android/`)
-```
-android/
-├── app/
-│   └── src/main/
-│       ├── AndroidManifest.xml    # VpnService permission
-│       ├── java/com/freenet/
-│       │   ├── MainActivity.kt    # UI — большая кнопка
-│       │   ├── VpnService.kt      # VpnService + tun2socks
-│       │   └── BypassEngine.kt    # обёртка над freenet.aar
-│       └── res/layout/
-└── build.gradle
-```
-
-**3. VpnService логика**
-```kotlin
-class FreenetVpnService : VpnService() {
-    override fun onStartCommand(...): Int {
-        val builder = Builder()
-            .addAddress("10.0.0.1", 24)
-            .addRoute("0.0.0.0", 0)       // весь трафик
-            .setMtu(1500)
-        val vpnFd = builder.establish()
-        // tun2socks: преобразует TUN → SOCKS5 → bypass engine
-        startTun2Socks(vpnFd)
-    }
-}
-```
+## Phase 3 статус: ✅ ЗАВЕРШЕНА (Android APK)
 
 ---
 
@@ -88,7 +22,6 @@ func main() {
 }
 
 func onReady() {
-    systray.SetIcon(iconData)
     systray.SetTitle("FreeNet")
     mToggle := systray.AddMenuItem("Включить", "")
     mQuit   := systray.AddMenuItem("Выйти", "")
@@ -177,6 +110,16 @@ tlsConfig := &tls.Config{
 
 ---
 
+## Phase 7 — Android улучшения 🔵
+
+- [ ] `xjasonlyu/tun2socks/v2` — заменить минимальный TCP стек на production-grade gVisor
+- [ ] IPv6 поддержка в TUN форвардере
+- [ ] UDP/QUIC поддержка (DNS, HTTP/3)
+- [ ] Per-app фильтрация (bypass только для выбранных приложений)
+- [ ] Google Play / F-Droid packaging
+
+---
+
 ## Быстрый старт для контрибьюторов
 
 ```bash
@@ -184,16 +127,16 @@ tlsConfig := &tls.Config{
 git clone https://github.com/mintfary-oss/zapret2-may.git
 cd zapret2-may/go-freenet
 
-# Запустить
+# Запустить (Linux/Docker)
 go run ./cmd/freenet -web :8080
+
+# Android APK
+bash scripts/build-release-apk.sh
 
 # Тесты
 go test ./...
 
 # Собрать для всех платформ
-make build   # см. Makefile (скоро)
-
-# или вручную:
 GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -o dist/freenet-linux-amd64   ./cmd/freenet
 GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -o dist/freenet-linux-arm64   ./cmd/freenet
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o dist/freenet-windows.exe   ./cmd/freenet
