@@ -27,12 +27,12 @@ const (
 // ─── Lazy DLL bindings ───────────────────────────────────────────────────────
 
 var (
-	winDivertDLL         = syscall.NewLazyDLL("WinDivert.dll")
-	procWinDivertOpen    = winDivertDLL.NewProc("WinDivertOpen")
-	procWinDivertRecv    = winDivertDLL.NewProc("WinDivertRecv")
-	procWinDivertSend    = winDivertDLL.NewProc("WinDivertSend")
-	procWinDivertClose   = winDivertDLL.NewProc("WinDivertClose")
-	procWinDivertCalcCS  = winDivertDLL.NewProc("WinDivertHelperCalcChecksums")
+	winDivertDLL        = syscall.NewLazyDLL("WinDivert.dll")
+	procWinDivertOpen   = winDivertDLL.NewProc("WinDivertOpen")
+	procWinDivertRecv   = winDivertDLL.NewProc("WinDivertRecv")
+	procWinDivertSend   = winDivertDLL.NewProc("WinDivertSend")
+	procWinDivertClose  = winDivertDLL.NewProc("WinDivertClose")
+	procWinDivertCalcCS = winDivertDLL.NewProc("WinDivertHelperCalcChecksums")
 )
 
 // ─── Handle ──────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ func Open() (*Handle, error) {
 	h, _, lastErr := procWinDivertOpen.Call(
 		uintptr(unsafe.Pointer(filterPtr)),
 		winDivertLayerNetwork,
-		0,             // priority
+		0, // priority
 		winDivertFlagNone,
 	)
 	if h == ^uintptr(0) { // INVALID_HANDLE_VALUE
@@ -156,17 +156,17 @@ func recalcChecksums(pkt []byte, addr []byte) {
 
 // IPv4/TCP header offsets (no IP options assumed — IHL == 5).
 const (
-	ipProtoOffset   = 9   // IP protocol byte
-	ipTotalLenOff   = 2   // IP total length (big-endian uint16)
-	ipSrcOff        = 12  // source IP
-	ipDstOff        = 16  // destination IP
-	ipHdrMinLen     = 20
-	tcpSrcPortOff   = 0   // relative to TCP header start
-	tcpDstPortOff   = 2
-	tcpSeqOff       = 4
-	tcpDataOffOff   = 12  // high nibble = data offset in 32-bit words
-	tcpHdrMinLen    = 20
-	ipProtoTCP      = 6
+	ipProtoOffset = 9  // IP protocol byte
+	ipTotalLenOff = 2  // IP total length (big-endian uint16)
+	ipSrcOff      = 12 // source IP
+	ipDstOff      = 16 // destination IP
+	ipHdrMinLen   = 20
+	tcpSrcPortOff = 0 // relative to TCP header start
+	tcpDstPortOff = 2
+	tcpSeqOff     = 4
+	tcpDataOffOff = 12 // high nibble = data offset in 32-bit words
+	tcpHdrMinLen  = 20
+	ipProtoTCP    = 6
 )
 
 // ipHeaderLen returns the IPv4 header length in bytes (IHL field × 4).
