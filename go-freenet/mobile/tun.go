@@ -1,17 +1,20 @@
-// Package mobile — minimal IPv4/TCP TUN forwarder for Android VpnService.
+// Package mobile — IPv4 TUN forwarder for Android VpnService.
 //
-// ForwardTUN reads raw IP packets from the TUN file descriptor created by
-// Android's VpnService, intercepts TCP SYN packets, and transparently proxies
-// each connection through the local SOCKS5 bypass engine.  UDP packets
-// destined for port 53 (DNS) are intercepted and resolved via DNS-over-HTTPS
-// so that ISP-level DNS poisoning cannot block access to filtered resources.
+// ForwardTUN reads raw IPv4 packets from the TUN file descriptor created by
+// Android's VpnService and handles them as follows:
 //
-// The userspace TCP state machine is intentionally minimal: it handles the
-// common case (SYN → SYN-ACK → data exchange → FIN) without implementing IP
-// fragmentation, TCP options negotiation, or SACK.
+//   - TCP: proxied through the local SOCKS5 bypass engine via a minimal
+//     userspace TCP state machine (SYN→SYN-ACK→data→FIN).
 //
-// Production note: for higher throughput consider replacing the TCP part of
-// this implementation with github.com/xjasonlyu/tun2socks/v2 (gVisor-based).
+//   - UDP port 53 (DNS): resolved via DNS-over-HTTPS to prevent ISP DNS
+//     poisoning.
+//
+//   - UDP (other ports): relayed directly to the destination via a protected
+//     UDP socket (UDP NAT table, see tun_udp.go).  This covers Discord,
+//     gaming, video calls, and QUIC/HTTP3 on arbitrary ports.
+//
+//   - IPv6: currently not processed; exclude "::/0" from VpnService routes
+//     to let IPv6 traffic bypass the VPN entirely.
 package mobile
 
 import (
@@ -52,9 +55,10 @@ type tunForwarder struct {
 	protector SocketProtector
 	dohClient *dns.Client // nil = DoH DNS intercept disabled
 
-	conns  sync.Map // key: connKey → *tunConn
-	closed atomic.Bool
-	done   chan struct{}
+	conns    sync.Map // key: connKey   → *tunConn    (TCP sessions)
+	udpConns sync.Map // key: udpKey    → *udpSession (UDP relay sessions)
+	closed   atomic.Bool
+	done     chan struct{}
 }
 
 // connKey uniquely identifies one TCP connection seen on the TUN interface.
@@ -125,12 +129,16 @@ func ForwardTUNWithDNS(tunFd int64, socksAddr string, dohServers []string, prote
 		done:      make(chan struct{}),
 	}
 
+	// Start background goroutines.
+	fw.startUDPRelay() // UDP NAT sweeper
+
 	log.Printf("tun: forwarder started (socks5 → %s)", socksAddr)
 	return fw.run()
 }
 
 // run is the main read-loop.
 func (fw *tunForwarder) run() error {
+	defer close(fw.done) // signal background goroutines (UDP sweeper etc.) to stop
 	buf := make([]byte, 65535)
 	for {
 		n, err := fw.tun.Read(buf)
@@ -163,8 +171,8 @@ func (fw *tunForwarder) handlePacket(pkt []byte) {
 	copy(srcIP[:], pkt[12:16])
 	copy(dstIP[:], pkt[16:20])
 
-	// Intercept UDP port-53 DNS queries and resolve via DoH.
-	if proto == 17 && fw.dohClient != nil {
+	// Handle UDP packets.
+	if proto == 17 {
 		udp := pkt[ihl:]
 		if len(udp) < 8 {
 			return
@@ -172,15 +180,23 @@ func (fw *tunForwarder) handlePacket(pkt []byte) {
 		srcPort := binary.BigEndian.Uint16(udp[0:2])
 		dstPort := binary.BigEndian.Uint16(udp[2:4])
 		udpLen := int(binary.BigEndian.Uint16(udp[4:6]))
-		if dstPort == 53 && udpLen >= 8 && len(udp) >= udpLen {
-			payload := make([]byte, udpLen-8)
-			copy(payload, udp[8:udpLen])
-			go fw.handleDNSQuery(srcIP, dstIP, srcPort, dstPort, payload)
+		if udpLen < 8 || len(udp) < udpLen {
+			return
+		}
+		udpPayload := make([]byte, udpLen-8)
+		copy(udpPayload, udp[8:udpLen])
+
+		if dstPort == 53 && fw.dohClient != nil {
+			// Intercept DNS queries and resolve via DoH.
+			go fw.handleDNSQuery(srcIP, dstIP, srcPort, dstPort, udpPayload)
+		} else {
+			// Relay all other UDP traffic through a protected socket.
+			fw.handleUDPRelay(srcIP, dstIP, srcPort, dstPort, udpPayload)
 		}
 		return
 	}
 
-	if proto != 6 { // everything else: TCP only
+	if proto != 6 { // everything other than TCP: drop
 		return
 	}
 

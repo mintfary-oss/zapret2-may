@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AppWidget metadata for the FreeNet toggle widget.
+
+  minWidth/minHeight: 2×1 cells on a typical launcher grid.
+  updatePeriodMillis: 0 — we update the widget ourselves on VPN state changes.
+  description:        shown in the "Add Widget" picker.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="50dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_toggle"
+    android:description="@string/widget_description"
+    android:widgetCategory="home_screen"
+    android:resizeMode="none" />

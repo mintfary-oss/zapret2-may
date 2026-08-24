@@ -12,6 +12,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
+import android.content.pm.PackageManager
 
 /**
  * FreenetVpnService manages the full VPN lifecycle:
@@ -123,6 +124,9 @@ class FreenetVpnService : VpnService() {
                 it.start()
             }
 
+            // Notify widget and MainActivity that VPN started.
+            sendBroadcast(Intent(ACTION_START).setPackage(packageName))
+
         } catch (e: Exception) {
             Log.e(TAG, "startVpn failed: $e")
             isRunning.set(false)
@@ -158,22 +162,59 @@ class FreenetVpnService : VpnService() {
 
     /**
      * Configures and establishes the TUN interface.
-     * All device traffic (0.0.0.0/0) is routed through it.
+     * All IPv4 device traffic is routed through it.  IPv6 is intentionally
+     * excluded (Go TUN forwarder is IPv4-only; Russian DPI targets IPv4).
+     *
+     * Per-app split-tunnel filtering is applied from [SplitTunnelConfig].
      */
     private fun buildTunInterface(): ParcelFileDescriptor {
-        return Builder()
+        val builder = Builder()
             .setSession(getString(R.string.app_name))
             .addAddress(TUN_ADDRESS, TUN_PREFIX)
-            // Route all IPv4 traffic through the TUN.
             .addRoute("0.0.0.0", 0)
-            // Route all IPv6 traffic through the TUN (logged as not-yet-handled).
-            .addRoute("::", 0)
             .addDnsServer(DNS_SERVER)
             .setMtu(1500)
-            // Exclude the FreeNet app itself so our SOCKS5 dial doesn't loop.
+            // Always exclude FreeNet itself so our SOCKS5 dial doesn't loop.
             .addDisallowedApplication(packageName)
-            .establish()
+
+        // Apply per-app split-tunnel configuration.
+        val splitCfg = SplitTunnelConfig.load(this)
+        if (splitCfg.mode != SplitTunnelConfig.MODE_DISABLED && splitCfg.apps.isNotEmpty()) {
+            val pm = packageManager
+            when (splitCfg.mode) {
+                SplitTunnelConfig.MODE_ALLOWLIST -> {
+                    // Only listed apps go through the VPN.
+                    splitCfg.apps.forEach { pkg ->
+                        if (isPackageInstalled(pm, pkg)) {
+                            builder.addAllowedApplication(pkg)
+                        }
+                    }
+                    Log.i(TAG, "Split tunnel ALLOWLIST: ${splitCfg.apps.size} app(s)")
+                }
+                SplitTunnelConfig.MODE_BLOCKLIST -> {
+                    // All apps except listed ones go through the VPN.
+                    splitCfg.apps.forEach { pkg ->
+                        if (isPackageInstalled(pm, pkg) && pkg != packageName) {
+                            builder.addDisallowedApplication(pkg)
+                        }
+                    }
+                    Log.i(TAG, "Split tunnel BLOCKLIST: ${splitCfg.apps.size} app(s) excluded")
+                }
+            }
+        }
+
+        return builder.establish()
             ?: throw IllegalStateException("VpnService.Builder.establish() returned null")
+    }
+
+    /** Checks whether a package is installed without throwing. */
+    private fun isPackageInstalled(pm: PackageManager, pkg: String): Boolean {
+        return try {
+            pm.getPackageInfo(pkg, 0)
+            true
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        }
     }
 
     // -------------------------------------------------------------------------

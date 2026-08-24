@@ -249,7 +249,55 @@ WinDivert.dll загружается через `syscall.NewLazyDLL("WinDivert.d
 
 ---
 
-### 13. Важное: токены GitHub
+### 13. Phase 7 — Android улучшения (ЗАВЕРШЕНА v1.6.0)
+
+**Пользователь:** "Переписку и все файлы обновил и давай дальше"
+
+**Neo:** Phase 7 — три направления улучшений Android.
+
+**7.1 UDP relay (`mobile/tun_udp.go`)**
+До v1.6.0: TUN форвардер пропускал только TCP и UDP port 53 (DNS).
+Discord, Steam, игры, видеозвонки — не работали.
+
+Реализован полноценный UDP NAT:
+- `udpSession` — состояние одного UDP flow (local socket + protector)
+- `handleUDPRelay()` — создаёт/находит сессию, форвардит пакет
+- `relayUDPResponses()` — горутина: читает ответы, инжектирует обратно в TUN
+- `sweepIdleUDPSessions()` — чистит сессии старше 30 секунд
+
+IPv6: убран маршрут `::/0` из `VpnService.Builder` → IPv6 трафик идёт напрямую,
+минуя VPN (российский DPI работает по IPv4, IPv6 блокируется реже).
+
+**7.2 Per-app фильтрация split-tunnel (`SplitTunnelConfig.kt`)**
+Три режима (хранятся в SharedPreferences):
+- `disabled` — все приложения через VPN (по умолчанию)
+- `allowlist` — только выбранные приложения через VPN
+- `blocklist` — все приложения, кроме выбранных
+
+`FreenetVpnService.buildTunInterface()` читает конфиг и вызывает
+`builder.addAllowedApplication()` / `addDisallowedApplication()`.
+`VpnViewModel` экспонирует `splitTunnel: StateFlow<SplitTunnelConfig>` +
+методы `setSplitTunnelMode()`, `toggleSplitTunnelApp()`.
+
+**7.3 Виджет на рабочем столе (`FreeNetWidget.kt`)**
+2×1 кнопка на домашнем экране:
+- Зелёная → "FreeNet ВКЛ" (VPN активен)
+- Красная → "FreeNet ВЫКЛ" (VPN остановлен)
+- Нажатие → toggleVPN (стоп если запущен, запуск через MainActivity если нет)
+- Автообновление при `ACTION_START` / `ACTION_STOP` из `FreenetVpnService`
+
+Зарегистрирован в `AndroidManifest.xml` как `AppWidgetProvider`.
+
+**7.4 UI per-app selector (`MainActivity.kt`)**
+Добавлен `SplitTunnelCard` — сворачиваемая карточка в основном экране:
+- RadioButton выбор режима (disabled / allowlist / blocklist)
+- При режиме != disabled: список установленных user-приложений с чекбоксами
+- Поиск по названию / package name
+- Загрузка списка в background через `LazyColumn` + `Dispatchers.IO`
+
+---
+
+### 14. Важное: токены GitHub
 
 В ходе сессии пользователь несколько раз публиковал GitHub токены в открытом чате.
 Все использованные токены необходимо немедленно отозвать:

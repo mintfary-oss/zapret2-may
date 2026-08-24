@@ -9,6 +9,7 @@ import android.net.VpnService
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * VpnViewModel holds the UI state for the main screen and provides helpers
@@ -41,6 +42,19 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Available strategy options shown in the strategy picker. */
     val strategies = listOf("auto", "split", "tlsrec", "combined", "fake", "none")
+
+    // -------------------------------------------------------------------------
+    // Split-tunnel (per-app VPN filtering) state
+    // -------------------------------------------------------------------------
+
+    private val _splitTunnel = MutableStateFlow(
+        SplitTunnelConfig.load(app)
+    )
+    /**
+     * Observable split-tunnel configuration.
+     * Collect in Compose with [StateFlow.collectAsState].
+     */
+    val splitTunnel: StateFlow<SplitTunnelConfig> = _splitTunnel.asStateFlow()
 
     // -------------------------------------------------------------------------
     // BroadcastReceiver — listens for service stop broadcasts.
@@ -133,4 +147,39 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
     fun updateStats(json: String) {
         _stats.value = json
     }
+
+    // -------------------------------------------------------------------------
+    // Split-tunnel helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Sets the split-tunnel mode ("disabled", "allowlist", or "blocklist") and
+     * persists the change.  The new config takes effect on the next VPN start.
+     */
+    fun setSplitTunnelMode(mode: String) {
+        val ctx: Context = getApplication()
+        val updated = _splitTunnel.value.copy(mode = mode)
+        SplitTunnelConfig.save(ctx, updated)
+        _splitTunnel.value = updated
+    }
+
+    /**
+     * Toggles the presence of [pkg] in the split-tunnel app list and persists
+     * the change.
+     */
+    fun toggleSplitTunnelApp(pkg: String) {
+        val ctx: Context = getApplication()
+        val current = _splitTunnel.value
+        val newApps = if (pkg in current.apps) {
+            current.apps - pkg
+        } else {
+            current.apps + pkg
+        }
+        val updated = current.copy(apps = newApps)
+        SplitTunnelConfig.save(ctx, updated)
+        _splitTunnel.value = updated
+    }
+
+    /** Returns true when [pkg] is currently in the split-tunnel app list. */
+    fun isSplitTunnelApp(pkg: String): Boolean = pkg in _splitTunnel.value.apps
 }

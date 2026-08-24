@@ -22,7 +22,7 @@ import (
 	"github.com/mintfary-oss/freenet/internal/web"
 )
 
-const version = "1.5.0"
+const version = "1.6.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")

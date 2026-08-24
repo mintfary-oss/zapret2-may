@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Home-screen widget layout for FreeNet.
+
+  A single rounded button showing the current VPN state.
+  Tapping it toggles the VPN on/off.
+  The background colour is updated programmatically by FreeNetWidget.kt:
+    • Green  (#2E7D32) when connected
+    • Red    (#C62828) when disconnected
+-->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="8dp"
+    android:background="@android:color/transparent">
+
+    <!-- Toggle button — occupies the full widget area -->
+    <Button
+        android:id="@+id/widget_btn_toggle"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:text="@string/widget_btn_off"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:backgroundTint="#C62828"
+        android:stateListAnimator="@null" />
+
+</LinearLayout>

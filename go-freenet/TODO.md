@@ -10,7 +10,7 @@
 | 4 | DNS-over-HTTPS (DoH) защита | ✅ Завершена |
 | 5 | ECH + unit tests | ✅ Завершена |
 | 6 | Windows WinDivert | ✅ Завершена |
-| 7 | Android улучшения (IPv6/UDP, per-app) | 🔄 Следующая |
+| 7 | Android улучшения (UDP relay, per-app, виджет) | ✅ Завершена |
 
 ---
 

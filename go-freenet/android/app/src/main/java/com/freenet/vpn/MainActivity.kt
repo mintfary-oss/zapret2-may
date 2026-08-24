@@ -2,6 +2,7 @@ package com.freenet.vpn
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.VpnService
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -9,7 +10,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,13 +23,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * Main screen — single-activity Compose UI.
@@ -48,6 +55,11 @@ import kotlinx.coroutines.delay
  */
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        /** Extra sent by FreeNetWidget to immediately start the VPN after launch. */
+        const val EXTRA_START_VPN = "com.freenet.vpn.EXTRA_START_VPN"
+    }
+
     private val viewModel: VpnViewModel by viewModels()
 
     /** Launched when the OS shows the VPN permission dialog. */
@@ -60,6 +72,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // If launched from the widget, start VPN immediately (handle permission).
+        if (intent?.getBooleanExtra(EXTRA_START_VPN, false) == true) {
+            handleToggle()
+        }
         setContent {
             FreeNetTheme {
                 Surface(
@@ -94,9 +110,10 @@ fun FreeNetScreen(
     viewModel: VpnViewModel,
     onToggle:  () -> Unit,
 ) {
-    val state    by viewModel.connectionState.collectAsState()
-    val strategy by viewModel.strategy.collectAsState()
-    val stats    by viewModel.stats.collectAsState()
+    val state       by viewModel.connectionState.collectAsState()
+    val strategy    by viewModel.strategy.collectAsState()
+    val stats       by viewModel.stats.collectAsState()
+    val splitTunnel by viewModel.splitTunnel.collectAsState()
 
     // Poll log lines from the service every 2 seconds.
     var logText by remember { mutableStateOf("") }
@@ -157,6 +174,13 @@ fun FreeNetScreen(
             if (state == VpnViewModel.ConnectionState.CONNECTED && logText.isNotEmpty()) {
                 LogCard(text = logText)
             }
+
+            // Per-app split-tunnel card (always shown).
+            SplitTunnelCard(
+                config   = splitTunnel,
+                onMode   = viewModel::setSplitTunnelMode,
+                onToggle = viewModel::toggleSplitTunnelApp,
+            )
         }
     }
 }
@@ -386,6 +410,178 @@ fun LogCard(text: String) {
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-app split tunnel card
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Collapsible card that lets the user choose which apps bypass FreeNet.
+ *
+ * Three modes:
+ *  - **disabled** — all apps (default).
+ *  - **allowlist** — only ticked apps go through VPN.
+ *  - **blocklist** — all apps except ticked ones go through VPN.
+ *
+ * The app list is loaded lazily from PackageManager on a background thread.
+ * Changes take effect on the next VPN start.
+ */
+@Composable
+fun SplitTunnelCard(
+    config:   SplitTunnelConfig,
+    onMode:   (String) -> Unit,
+    onToggle: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    var search   by remember { mutableStateOf("") }
+
+    // Installed user apps — loaded once and cached.
+    var installedApps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        installedApps = withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            pm.getInstalledApplications(0)
+                .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
+                .map { AppEntry(it.packageName, pm.getApplicationLabel(it).toString()) }
+                .sortedBy { it.label }
+        }
+    }
+
+    val modes = listOf(
+        SplitTunnelConfig.MODE_DISABLED  to stringResource(R.string.split_tunnel_mode_disabled),
+        SplitTunnelConfig.MODE_ALLOWLIST to stringResource(R.string.split_tunnel_mode_allowlist),
+        SplitTunnelConfig.MODE_BLOCKLIST to stringResource(R.string.split_tunnel_mode_blocklist),
+    )
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header row — tapping expands/collapses the card.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text       = stringResource(R.string.split_tunnel_title),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize   = 14.sp,
+                )
+                Text(
+                    text     = if (expanded) "▲" else "▼",
+                    fontSize = 12.sp,
+                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (expanded) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+
+                // Mode radio buttons.
+                modes.forEach { (mode, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onMode(mode) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = config.mode == mode,
+                            onClick  = { onMode(mode) },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(label, fontSize = 13.sp)
+                    }
+                }
+
+                // App list (hidden when mode is disabled).
+                if (config.mode != SplitTunnelConfig.MODE_DISABLED) {
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+
+                    // Search field.
+                    OutlinedTextField(
+                        value         = search,
+                        onValueChange = { search = it },
+                        placeholder   = { Text("Поиск приложения…", fontSize = 13.sp) },
+                        singleLine    = true,
+                        modifier      = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    val filtered = installedApps.filter {
+                        search.isEmpty() ||
+                        it.label.contains(search, ignoreCase = true) ||
+                        it.packageName.contains(search, ignoreCase = true)
+                    }
+
+                    if (filtered.isEmpty()) {
+                        Text(
+                            text     = if (installedApps.isEmpty()) "Загрузка…" else "Нет совпадений",
+                            fontSize = 13.sp,
+                            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        // Show up to 20 rows in a fixed-height box.
+                        val visible = filtered.take(20)
+                        LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                            items(visible) { app ->
+                                val checked = app.packageName in config.apps
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onToggle(app.packageName) }
+                                        .padding(vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Checkbox(
+                                        checked  = checked,
+                                        onCheckedChange = { onToggle(app.packageName) },
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(app.label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                        Text(
+                                            app.packageName,
+                                            fontSize = 11.sp,
+                                            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if (filtered.size > 20) {
+                            Text(
+                                text     = "…и ещё ${filtered.size - 20} приложений. Уточните поиск.",
+                                fontSize = 12.sp,
+                                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text     = "Изменения применяются при следующем запуске VPN.",
+                        fontSize = 11.sp,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Minimal data class holding one installed app entry. */
+private data class AppEntry(val packageName: String, val label: String)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme

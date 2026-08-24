@@ -30,6 +30,17 @@
     <string name="notification_text">Обход блокировок включён</string>
     <string name="notification_action_stop">Остановить</string>
 
+    <!-- Home screen widget -->
+    <string name="widget_description">FreeNet — переключатель обхода блокировок одним нажатием</string>
+    <string name="widget_btn_on">FreeNet ВКЛ</string>
+    <string name="widget_btn_off">FreeNet ВЫКЛ</string>
+
+    <!-- Split tunnel -->
+    <string name="split_tunnel_title">Выбор приложений</string>
+    <string name="split_tunnel_mode_disabled">Все приложения (по умолчанию)</string>
+    <string name="split_tunnel_mode_allowlist">Только выбранные приложения</string>
+    <string name="split_tunnel_mode_blocklist">Все, кроме выбранных</string>
+
     <!-- Permissions / dialogs -->
     <string name="vpn_permission_title">Разрешение VPN</string>
     <string name="vpn_permission_message">FreeNet запросит разрешение на создание VPN соединения для обхода DPI блокировок.</string>

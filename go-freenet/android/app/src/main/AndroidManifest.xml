@@ -51,5 +51,22 @@
             </intent-filter>
         </receiver>
 
+        <!--
+          FreeNetWidget — 2×1 home screen toggle button.
+          android:exported="true" is required so the launcher can send
+          APPWIDGET_UPDATE intents to this receiver.
+        -->
+        <receiver
+            android:name=".FreeNetWidget"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.freenet.vpn.WIDGET_TOGGLE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/freenet_widget_info" />
+        </receiver>
+
     </application>
 </manifest>
