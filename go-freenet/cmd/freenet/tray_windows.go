@@ -54,9 +54,11 @@ func trayOnReady(webAddr string, srv *proxy.Server) {
 	systray.SetIcon(iconData)
 	systray.SetTooltip("FreeNet — Обход блокировок / DPI bypass")
 
-	// ── Status label (non-clickable) ─────────────────────────────────────────
+	// ── Status labels (non-clickable) ────────────────────────────────────────
 	mStatus := systray.AddMenuItem(statusLabel(srv.Enabled()), "Текущее состояние bypass")
 	mStatus.Disable()
+	mProxyStatus := systray.AddMenuItem(proxyStatusLabel(srv.Enabled()), "Системный прокси Windows")
+	mProxyStatus.Disable()
 	systray.AddSeparator()
 
 	// ── Toggle bypass ─────────────────────────────────────────────────────────
@@ -99,9 +101,10 @@ func trayOnReady(webAddr string, srv *proxy.Server) {
 	go func() {
 		for range mToggle.ClickedCh {
 			next := !srv.Enabled()
-			srv.SetEnabled(next)
+			srv.SetEnabled(next) // also calls sysproxy.Set / sysproxy.Restore
 			mToggle.SetTitle(toggleLabel(next))
 			mStatus.SetTitle(statusLabel(next))
+			mProxyStatus.SetTitle(proxyStatusLabel(next))
 		}
 	}()
 
@@ -156,6 +159,13 @@ func toggleLabel(enabled bool) string {
 
 func stratLabel(strategy string) string {
 	return fmt.Sprintf("Стратегия: %s", strategy)
+}
+
+func proxyStatusLabel(enabled bool) string {
+	if enabled {
+		return "↗ Системный прокси: установлен"
+	}
+	return "↗ Системный прокси: снят"
 }
 
 // waitForSignal blocks until SIGINT or SIGTERM, then gracefully stops the

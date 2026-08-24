@@ -12,6 +12,7 @@ import (
 	"github.com/mintfary-oss/freenet/internal/bypass"
 	"github.com/mintfary-oss/freenet/internal/config"
 	"github.com/mintfary-oss/freenet/internal/logs"
+	"github.com/mintfary-oss/freenet/internal/sysproxy"
 	"github.com/mintfary-oss/freenet/internal/types"
 )
 
@@ -68,6 +69,12 @@ func (s *Server) Start() error {
 	go s.acceptSOCKS(ln)
 	log.Printf("SOCKS5 listening on %s", s.cfg.Proxy.ListenAddr)
 
+	// On Windows, register FreeNet as the system-wide SOCKS5 proxy so that
+	// Chrome, Edge, and other WinInet apps work without manual configuration.
+	if err := sysproxy.Set(s.cfg.Proxy.ListenAddr); err != nil {
+		log.Printf("sysproxy: %v (continuing without system proxy)", err)
+	}
+
 	// Start kernel-level nfqueue handler (Linux, optional).
 	if err := s.nfq.Start(); err != nil {
 		log.Printf("nfqueue: %v (continuing without kernel-level bypass)", err)
@@ -91,7 +98,9 @@ func (s *Server) Start() error {
 }
 
 // Stop closes all listeners and the nfqueue handler.
+// It also restores the original Windows system proxy settings (no-op elsewhere).
 func (s *Server) Stop() {
+	sysproxy.Restore()
 	s.nfq.Stop()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -107,11 +116,17 @@ func (s *Server) Stop() {
 func (s *Server) Enabled() bool { return s.enabled.Load() }
 
 // SetEnabled toggles bypass on or off at runtime.
+// On Windows it also sets or restores the system-wide SOCKS5 proxy so that
+// browsers react immediately without any manual configuration.
 func (s *Server) SetEnabled(v bool) {
 	s.enabled.Store(v)
 	if v {
+		if err := sysproxy.Set(s.cfg.Proxy.ListenAddr); err != nil {
+			log.Printf("sysproxy: %v", err)
+		}
 		log.Println("bypass ENABLED")
 	} else {
+		sysproxy.Restore()
 		log.Println("bypass DISABLED")
 	}
 }
