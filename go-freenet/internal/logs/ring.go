@@ -53,6 +53,13 @@ func (r *Ring) Write(p []byte) (int, error) {
 // Ensure Ring satisfies io.Writer.
 var _ io.Writer = (*Ring)(nil)
 
+// Size returns the number of entries currently stored in the ring.
+func (r *Ring) Size() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.count
+}
+
 func (r *Ring) push(e Entry) {
 	r.mu.Lock()
 	r.buf[r.head] = e

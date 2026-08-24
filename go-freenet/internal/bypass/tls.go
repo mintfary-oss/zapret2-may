@@ -19,12 +19,24 @@ type TLSInfo struct {
 	SNIOffset int
 	// SNI is the server name extracted from the extension.
 	SNI string
+	// HasECH is true when the ClientHello contains the
+	// encrypted_client_hello extension (type 0xFE0D, RFC 9601).
+	// When HasECH is true the outer ClientHello carries only a cover
+	// domain — the real SNI is already encrypted inside the ECH inner
+	// ClientHello.  DPI bypass strategies are unnecessary and may
+	// corrupt the handshake; the relay should forward bytes unmodified.
+	HasECH bool
 }
 
 const (
 	tlsRecordTypeHandshake  = 0x16
 	tlsHandshakeClientHello = 0x01
 	tlsExtSNI               = 0x0000
+	// tlsExtECH is the IANA-assigned type for encrypted_client_hello
+	// (RFC 9601, formerly draft-ietf-tls-esni). Chrome and Firefox
+	// 2024+ send this extension when the server advertises ECH support
+	// via its DNS HTTPS record.
+	tlsExtECH = 0xFE0D
 )
 
 // ParseClientHello attempts to parse buf as a TLS ClientHello record and
@@ -81,15 +93,16 @@ func ParseClientHello(buf []byte) (*TLSInfo, error) {
 	extEnd := pos + 2 + int(binary.BigEndian.Uint16(buf[pos:pos+2]))
 	pos += 2
 
-	// Walk extensions looking for SNI (type 0x0000).
+	// Walk extensions looking for SNI (0x0000) and ECH (0xFE0D).
 	for pos+4 <= extEnd && pos+4 <= len(buf) {
 		extType := binary.BigEndian.Uint16(buf[pos : pos+2])
 		extLen := int(binary.BigEndian.Uint16(buf[pos+2 : pos+4]))
 		extDataStart := pos + 4
 
-		if extType == tlsExtSNI && extDataStart+extLen <= len(buf) {
-			// SNI list: list_length(2) + name_type(1) + name_length(2) + name
-			if extLen >= 5 {
+		switch extType {
+		case tlsExtSNI:
+			if extDataStart+extLen <= len(buf) && extLen >= 5 {
+				// SNI list: list_length(2) + name_type(1) + name_length(2) + name
 				nameLen := int(binary.BigEndian.Uint16(buf[extDataStart+3 : extDataStart+5]))
 				nameStart := extDataStart + 5
 				if nameStart+nameLen <= len(buf) {
@@ -97,7 +110,12 @@ func ParseClientHello(buf []byte) (*TLSInfo, error) {
 					info.SNIOffset = nameStart
 				}
 			}
+		case tlsExtECH:
+			// encrypted_client_hello (RFC 9601) — real SNI is already
+			// encrypted; bypass strategies must not be applied.
+			info.HasECH = true
 		}
+
 		pos = extDataStart + extLen
 	}
 

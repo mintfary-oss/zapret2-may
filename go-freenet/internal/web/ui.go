@@ -30,6 +30,9 @@ type Controller interface {
 	DNSEnabled() bool
 	// DNSStats returns the total query and error counts from the DoH resolver.
 	DNSStats() (queries, errors int64)
+	// ECHPassthroughs returns the count of connections forwarded unmodified
+	// because the ClientHello carried an ECH extension.
+	ECHPassthroughs() int64
 }
 
 // UI is the HTTP server that hosts the web control panel.
@@ -92,13 +95,14 @@ func (u *UI) Stop() {
 // ---- API types ----
 
 type statusResponse struct {
-	Enabled      bool   `json:"enabled"`
-	Strategy     string `json:"strategy"`
-	ListenAddr   string `json:"listen_addr"`
-	HostlistSize int    `json:"hostlist_size"`
-	DNSEnabled   bool   `json:"dns_enabled"`
-	DNSQueries   int64  `json:"dns_queries"`
-	DNSErrors    int64  `json:"dns_errors"`
+	Enabled         bool   `json:"enabled"`
+	Strategy        string `json:"strategy"`
+	ListenAddr      string `json:"listen_addr"`
+	HostlistSize    int    `json:"hostlist_size"`
+	DNSEnabled      bool   `json:"dns_enabled"`
+	DNSQueries      int64  `json:"dns_queries"`
+	DNSErrors       int64  `json:"dns_errors"`
+	ECHPassthroughs int64  `json:"ech_passthroughs"`
 }
 
 type toggleRequest struct {
@@ -118,13 +122,14 @@ type autoDetectRequest struct {
 func (u *UI) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	dnsQ, dnsE := u.ctrl.DNSStats()
 	writeJSON(w, statusResponse{
-		Enabled:      u.ctrl.Enabled(),
-		Strategy:     u.ctrl.Strategy(),
-		ListenAddr:   u.cfg.Proxy.ListenAddr,
-		HostlistSize: u.ctrl.HostlistSize(),
-		DNSEnabled:   u.ctrl.DNSEnabled(),
-		DNSQueries:   dnsQ,
-		DNSErrors:    dnsE,
+		Enabled:         u.ctrl.Enabled(),
+		Strategy:        u.ctrl.Strategy(),
+		ListenAddr:      u.cfg.Proxy.ListenAddr,
+		HostlistSize:    u.ctrl.HostlistSize(),
+		DNSEnabled:      u.ctrl.DNSEnabled(),
+		DNSQueries:      dnsQ,
+		DNSErrors:       dnsE,
+		ECHPassthroughs: u.ctrl.ECHPassthroughs(),
 	})
 }
 
@@ -398,6 +403,7 @@ button.small.warn{background:var(--warn)}
 
   <div class="addr" id="addr-text"></div>
   <div class="addr" id="dns-text" style="margin-top:.3rem"></div>
+  <div class="addr" id="ech-text" style="margin-top:.3rem"></div>
 </div>
 
 <div id="log-box"></div>
@@ -548,6 +554,14 @@ async function loadStatus(){
   } else {
     dnsEl.textContent = '⚠ DNS-over-HTTPS выключен (DNS может быть подменён)';
     dnsEl.style.color = 'var(--warn)';
+  }
+  const echEl = document.getElementById('ech-text');
+  if(s.ech_passthroughs > 0){
+    echEl.textContent = '🔐 ECH обнаружен: ' + s.ech_passthroughs + ' соед. (браузер уже шифрует SNI)';
+    echEl.style.color = 'var(--green)';
+  } else {
+    echEl.textContent = '🔐 ECH: ожидание соединений с ECH-клиентами (Chrome/Firefox)';
+    echEl.style.color = 'var(--muted)';
   }
 }
 

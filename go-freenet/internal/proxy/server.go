@@ -29,6 +29,7 @@ var _ interface {
 	RunAutoDetect(string) []types.ProbeResult
 	DNSEnabled() bool
 	DNSStats() (int64, int64)
+	ECHPassthroughs() int64
 } = (*Server)(nil)
 
 // Server manages the proxy listeners and exposes a toggle to enable/disable
@@ -74,6 +75,10 @@ func (s *Server) Start() error {
 			s.dnsRes = res
 			s.engine.SetHTTPClient(dns.NewDoHHTTPClient(s.cfg.DNS.ListenAddr))
 			log.Printf("dns: DoH protection active on %s", s.cfg.DNS.ListenAddr)
+			// Attempt to enable ECH for DoH connections in the background.
+			// This is non-blocking and non-fatal — ECH improves privacy of
+			// our own DNS requests but is not required for operation.
+			go dohClient.EnableECH(context.Background())
 		}
 	}
 
@@ -188,3 +193,7 @@ func (s *Server) DNSStats() (queries, errors int64) {
 
 // DNSEnabled reports whether the local DoH resolver is running.
 func (s *Server) DNSEnabled() bool { return s.dnsRes != nil }
+
+// ECHPassthroughs returns the number of connections forwarded unmodified
+// because the incoming ClientHello carried an ECH extension.
+func (s *Server) ECHPassthroughs() int64 { return s.engine.ECHPassthroughs() }

@@ -13,10 +13,15 @@ package dns
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"sync"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -34,6 +39,7 @@ var DefaultServers = []string{
 // It tries each configured server in order and returns the first success.
 // All methods are safe for concurrent use.
 type Client struct {
+	mu         sync.RWMutex
 	servers    []string
 	httpClient *http.Client
 }
@@ -59,9 +65,14 @@ func (c *Client) Servers() []string { return c.servers }
 // first available DoH server and returns the raw DNS wire-format response.
 // It tries each server once and stops at the first success.
 func (c *Client) Exchange(ctx context.Context, query []byte) ([]byte, error) {
+	c.mu.RLock()
+	servers := c.servers
+	hc := c.httpClient
+	c.mu.RUnlock()
+
 	var lastErr error
-	for _, srv := range c.servers {
-		resp, err := c.doQuery(ctx, srv, query)
+	for _, srv := range servers {
+		resp, err := c.doQueryWith(ctx, hc, srv, query)
 		if err == nil {
 			return resp, nil
 		}
@@ -84,8 +95,8 @@ func (c *Client) Lookup(ctx context.Context, name string) ([]string, error) {
 	return parseAddrs(raw)
 }
 
-// doQuery sends query to a single DoH server and returns the raw response.
-func (c *Client) doQuery(ctx context.Context, server string, query []byte) ([]byte, error) {
+// doQueryWith sends query to a single DoH server using the given HTTP client.
+func (c *Client) doQueryWith(ctx context.Context, hc *http.Client, server string, query []byte) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server, bytes.NewReader(query))
 	if err != nil {
 		return nil, err
@@ -93,7 +104,7 @@ func (c *Client) doQuery(ctx context.Context, server string, query []byte) ([]by
 	req.Header.Set("Content-Type", "application/dns-message")
 	req.Header.Set("Accept", "application/dns-message")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +114,73 @@ func (c *Client) doQuery(ctx context.Context, server string, query []byte) ([]by
 		return nil, fmt.Errorf("DoH server %s returned HTTP %d", server, resp.StatusCode)
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// EnableECH fetches ECH configs for all configured DoH servers via DNS HTTPS
+// records and upgrades the internal HTTP transport to use ECH for subsequent
+// DoH requests.  Non-fatal: if ECH configs cannot be fetched the client
+// continues operating without ECH.
+//
+// Call once after the client is created, in a background goroutine so that
+// startup is not blocked.
+func (c *Client) EnableECH(ctx context.Context) {
+	// Collect ECH configs per DoH server hostname.
+	type echEntry struct {
+		host string
+		cfg  []byte
+	}
+	var entries []echEntry
+
+	c.mu.RLock()
+	servers := c.servers
+	c.mu.RUnlock()
+
+	for _, srv := range servers {
+		u, err := url.Parse(srv)
+		if err != nil {
+			continue
+		}
+		host := u.Hostname()
+		echCfg, err := c.LookupECHConfig(ctx, host)
+		if err != nil || len(echCfg) == 0 {
+			continue // server may not publish ECH — not an error
+		}
+		entries = append(entries, echEntry{host: host, cfg: echCfg})
+		log.Printf("dns: ECH config fetched for DoH server %s (%d bytes)", host, len(echCfg))
+	}
+
+	if len(entries) == 0 {
+		return // no ECH configs available
+	}
+
+	// Build a per-hostname ECH map for the TLS dialer.
+	echMap := make(map[string][]byte, len(entries))
+	for _, e := range entries {
+		echMap[e.host] = e.cfg
+	}
+
+	echTransport := &http.Transport{
+		// DialTLSContext is called for every HTTPS connection.  We inject
+		// the ECH config list for DoH server hosts that support it.
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, _, _ := net.SplitHostPort(addr)
+			tlsCfg := &tls.Config{}
+			if echCfg, ok := echMap[host]; ok {
+				tlsCfg.EncryptedClientHelloConfigList = echCfg
+				tlsCfg.MinVersion = tls.VersionTLS13
+			}
+			return tls.DialWithDialer(&net.Dialer{}, network, addr, tlsCfg)
+		},
+	}
+
+	c.mu.Lock()
+	c.httpClient = &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: echTransport,
+	}
+	c.mu.Unlock()
+
+	log.Printf("dns: ECH enabled for %d DoH server(s)", len(entries))
 }
 
 // NewDoHHTTPClient returns an *http.Client whose TCP dialer uses the local
@@ -125,6 +203,107 @@ func NewDoHHTTPClient(resolverAddr string) *http.Client {
 			DialContext: d.DialContext,
 		},
 	}
+}
+
+// ---------------------------------------------------------------------------
+// HTTPS / SVCB record — ECH config extraction
+// ---------------------------------------------------------------------------
+
+// typeHTTPS is the IANA-assigned DNS type for HTTPS records (RFC 9460).
+// golang.org/x/net/dns/dnsmessage does not define this constant; it
+// returns the rdata as *dnsmessage.UnknownResource for unrecognised types.
+const typeHTTPS dnsmessage.Type = 65
+
+// svcParamKeyECH is the SvcParam key for encrypted_client_hello (key 5).
+const svcParamKeyECH uint16 = 5
+
+// LookupECHConfig queries the DNS HTTPS record for name and returns the
+// raw ECH config list bytes (SvcParam key 5, RFC 9460 §7.3).
+//
+// Returns (nil, nil) when the domain has no HTTPS record or carries no ECH
+// config — not an error, just no ECH support detected.
+func (c *Client) LookupECHConfig(ctx context.Context, name string) ([]byte, error) {
+	q, err := buildQuery(name, typeHTTPS)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.Exchange(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return parseECHFromHTTPS(raw)
+}
+
+// parseECHFromHTTPS scans a raw DNS response for HTTPS answers and extracts
+// the ECH config bytes from the first record that carries SvcParam key 5.
+func parseECHFromHTTPS(raw []byte) ([]byte, error) {
+	var msg dnsmessage.Message
+	if err := msg.Unpack(raw); err != nil {
+		return nil, fmt.Errorf("dns: unpack HTTPS response: %w", err)
+	}
+	for _, ans := range msg.Answers {
+		if ans.Header.Type != typeHTTPS {
+			continue
+		}
+		// For unknown types the library returns *dnsmessage.UnknownResource.
+		unknown, ok := ans.Body.(*dnsmessage.UnknownResource)
+		if !ok {
+			continue
+		}
+		if ech := parseSVCBECH(unknown.Data); len(ech) > 0 {
+			return ech, nil
+		}
+	}
+	return nil, nil
+}
+
+// parseSVCBECH decodes SVCB wire-format rdata (RFC 9460 §2.2) and returns
+// the value of SvcParam key 5 (ech), or nil when absent.
+//
+// SVCB rdata layout:
+//
+//	Priority    uint16
+//	TargetName  DNS name (wire-format, variable length)
+//	SvcParams   sequence of { key uint16, length uint16, value [length]byte }
+func parseSVCBECH(data []byte) []byte {
+	if len(data) < 4 {
+		return nil
+	}
+	pos := 2 // skip Priority (2 bytes)
+
+	// Skip TargetName: a DNS wire-format name is a sequence of labels
+	// ending with a zero-length label (0x00) or a pointer (0xC0|0x80).
+	for pos < len(data) {
+		labelLen := int(data[pos])
+		switch {
+		case labelLen == 0: // root label — name ends here
+			pos++
+			goto parseSvcParams
+		case labelLen&0xC0 == 0xC0: // pointer — 2 bytes, name ends
+			pos += 2
+			goto parseSvcParams
+		default:
+			pos += 1 + labelLen
+		}
+	}
+
+parseSvcParams:
+	// Parse SvcParam list: key(2) + length(2) + value(length)
+	for pos+4 <= len(data) {
+		key := binary.BigEndian.Uint16(data[pos : pos+2])
+		vlen := int(binary.BigEndian.Uint16(data[pos+2 : pos+4]))
+		pos += 4
+		if pos+vlen > len(data) {
+			break
+		}
+		if key == svcParamKeyECH {
+			out := make([]byte, vlen)
+			copy(out, data[pos:pos+vlen])
+			return out
+		}
+		pos += vlen
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
