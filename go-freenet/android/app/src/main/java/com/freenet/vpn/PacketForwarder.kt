@@ -41,12 +41,12 @@ class PacketForwarder(
         private const val TAG = "PacketForwarder"
         private const val MAX_PACKET = 65535
 
-        // TCP flags.
-        private const val FLAG_FIN: Byte = 0x01
-        private const val FLAG_SYN: Byte = 0x02
-        private const val FLAG_RST: Byte = 0x04
-        private const val FLAG_PSH: Byte = 0x08
-        private const val FLAG_ACK: Byte = 0x10
+        // TCP flags (kept as Int — bitwise 'and' on Byte requires toInt() in Kotlin).
+        private const val FLAG_FIN: Int = 0x01
+        private const val FLAG_SYN: Int = 0x02
+        private const val FLAG_RST: Int = 0x04
+        private const val FLAG_PSH: Int = 0x08
+        private const val FLAG_ACK: Int = 0x10
 
         private const val SOCKS5_PORT_DEFAULT = 1080
     }
@@ -132,10 +132,11 @@ class PacketForwarder(
         val dataOff = ((pkt.get(tcpOff + 12).toInt() and 0xFF) shr 4) * 4
         val flags   = pkt.get(tcpOff + 13)
 
-        val isSyn = (flags and FLAG_SYN) != 0.toByte()
-        val isAck = (flags and FLAG_ACK) != 0.toByte()
-        val isFin = (flags and FLAG_FIN) != 0.toByte()
-        val isRst = (flags and FLAG_RST) != 0.toByte()
+        val fi    = flags.toInt() and 0xFF
+        val isSyn = (fi and FLAG_SYN) != 0
+        val isAck = (fi and FLAG_ACK) != 0
+        val isFin = (fi and FLAG_FIN) != 0
+        val isRst = (fi and FLAG_RST) != 0
 
         val key = ConnKey(srcIp, dstIp, srcPort, dstPort)
 
@@ -190,7 +191,7 @@ class PacketForwarder(
                 out.write(buildTcpPacket(
                     key.dstIp, key.srcIp, key.dstPort, key.srcPort,
                     seq = 0, ack = (clientISN + 1) and 0xFFFFFFFFL,
-                    flags = FLAG_RST.toInt(),
+                    flags = FLAG_RST,
                 ))
             }
             return
@@ -211,7 +212,7 @@ class PacketForwarder(
                 key.dstIp, key.srcIp, key.dstPort, key.srcPort,
                 seq   = serverISN,
                 ack   = clientISN + 1,
-                flags = (FLAG_SYN.toInt() or FLAG_ACK.toInt()),
+                flags = (FLAG_SYN or FLAG_ACK),
             ))
         }
 
@@ -240,7 +241,7 @@ class PacketForwarder(
                         tc.key.dstIp, tc.key.srcIp,
                         tc.key.dstPort, tc.key.srcPort,
                         seq = seq, ack = ack,
-                        flags = (FLAG_PSH.toInt() or FLAG_ACK.toInt()),
+                        flags = (FLAG_PSH or FLAG_ACK),
                         payload = buf.copyOf(n),
                     ))
                 }
@@ -257,7 +258,7 @@ class PacketForwarder(
                 out.write(buildTcpPacket(
                     tc.key.dstIp, tc.key.srcIp, tc.key.dstPort, tc.key.srcPort,
                     seq = seq, ack = ack,
-                    flags = (FLAG_FIN.toInt() or FLAG_ACK.toInt()),
+                    flags = (FLAG_FIN or FLAG_ACK),
                 ))
             }
         } catch (_: IOException) {}
