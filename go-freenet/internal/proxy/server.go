@@ -32,6 +32,7 @@ type Server struct {
 	cfg     *config.Config
 	ring    *logs.Ring
 	engine  *bypass.Engine
+	nfq     *NFQueueServer
 	enabled atomic.Bool
 	Stats   Stats
 
@@ -43,10 +44,12 @@ type Server struct {
 // NewServer constructs a Server from cfg. Call Start to begin accepting
 // connections.
 func NewServer(cfg *config.Config, ring *logs.Ring) *Server {
+	eng := bypass.NewEngine(cfg)
 	return &Server{
 		cfg:    cfg,
 		ring:   ring,
-		engine: bypass.NewEngine(cfg),
+		engine: eng,
+		nfq:    NewNFQueueServer(cfg, eng),
 	}
 }
 
@@ -65,6 +68,11 @@ func (s *Server) Start() error {
 	go s.acceptSOCKS(ln)
 	log.Printf("SOCKS5 listening on %s", s.cfg.Proxy.ListenAddr)
 
+	// Start kernel-level nfqueue handler (Linux, optional).
+	if err := s.nfq.Start(); err != nil {
+		log.Printf("nfqueue: %v (continuing without kernel-level bypass)", err)
+	}
+
 	// Optional transparent proxy (Linux only).
 	if s.cfg.Proxy.TransparentAddr != "" {
 		tln, err := net.Listen("tcp", s.cfg.Proxy.TransparentAddr)
@@ -82,8 +90,9 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Stop closes all listeners.
+// Stop closes all listeners and the nfqueue handler.
 func (s *Server) Stop() {
+	s.nfq.Stop()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.socksLn != nil {

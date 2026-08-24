@@ -86,6 +86,20 @@ func (e *Engine) RelayDomain(client, remote net.Conn, domain string) {
 		relaySplit(client, remote, e.cfg.Bypass.SplitPos)
 	case "disorder":
 		relayDisorder(client, remote, e.cfg.Bypass.SplitPos)
+	case "fake":
+		relayFake(client, remote, fakeConfig{
+			FakeTTL:  e.cfg.Bypass.FakeTTL,
+			SplitPos: e.cfg.Bypass.SplitPos,
+			MD5Fake:  e.cfg.Bypass.MD5Fake,
+		})
+	case "tlsrec":
+		relayTLSRec(client, remote, e.cfg.Bypass.SplitPos)
+	case "combined":
+		relayCombined(client, remote, fakeConfig{
+			FakeTTL:  e.cfg.Bypass.FakeTTL,
+			SplitPos: e.cfg.Bypass.SplitPos,
+			MD5Fake:  e.cfg.Bypass.MD5Fake,
+		})
 	case "none":
 		relayPlain(client, remote)
 	default:
@@ -96,6 +110,6 @@ func (e *Engine) RelayDomain(client, remote net.Conn, domain string) {
 // RunAutoDetect tests all strategies against target and caches the winner.
 // Results are returned for display in the web UI.
 func (e *Engine) RunAutoDetect(target string) []types.ProbeResult {
-	strategies := []string{"split", "disorder", "none"}
+	strategies := []string{"combined", "fake", "tlsrec", "split", "disorder", "none"}
 	return globalDetector.Run(target, strategies, e.cfg.Bypass.SplitPos)
 }

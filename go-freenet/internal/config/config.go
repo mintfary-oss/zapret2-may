@@ -12,6 +12,17 @@ type Config struct {
 	Proxy    ProxyConfig    `yaml:"proxy"`
 	Bypass   BypassConfig   `yaml:"bypass"`
 	Hostlist HostlistConfig `yaml:"hostlist"`
+	NFQueue  NFQueueConfig  `yaml:"nfqueue"`
+}
+
+// NFQueueConfig controls the optional Linux netfilter-queue integration.
+// When enabled, freenet intercepts kernel-level TCP packets directly — no
+// SOCKS5 proxy configuration is needed in the browser or OS.
+type NFQueueConfig struct {
+	// Enabled activates the nfqueue handler (Linux only, requires CAP_NET_ADMIN).
+	Enabled bool `yaml:"enabled"`
+	// QueueNum is the netfilter queue number (must match iptables --queue-num).
+	QueueNum int `yaml:"queue_num"`
 }
 
 // ProxyConfig controls the listening addresses.
@@ -35,6 +46,10 @@ type BypassConfig struct {
 	FakeTTL int `yaml:"fake_ttl"`
 	// DisorderFrag enables TCP segment re-ordering (disorder attack).
 	DisorderFrag bool `yaml:"disorder_frag"`
+	// MD5Fake uses bad-TCP-checksum decoy instead of low-TTL decoy.
+	// bad-checksum works when TTL-based decoy is unreliable (DPI is not
+	// between you and the server, or TTL value is hard to tune).
+	MD5Fake bool `yaml:"md5_fake"`
 }
 
 // HostlistConfig controls domain filtering.
@@ -59,6 +74,10 @@ func defaults() *Config {
 			Strategy: "auto",
 			SplitPos: 2,
 			FakeTTL:  8,
+		},
+		NFQueue: NFQueueConfig{
+			Enabled:  false,
+			QueueNum: 200,
 		},
 		Hostlist: HostlistConfig{
 			Enabled:    false,

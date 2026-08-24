@@ -1,168 +1,179 @@
 # Что нужно сделать — FreeNet Go
 
-## Приоритет: Высокий 🔴
+## Phase 2 статус: ✅ ЗАВЕРШЕНА
 
-### 1. Fake packets через raw sockets (Linux)
-**Что:** Отправка фейковых TCP пакетов с неправильным checksum/TTL через `SOCK_RAW`.
-Это самый эффективный метод — DPI обрабатывает фейк и путается, сервер игнорирует.
-
-**Как:**
-```go
-// Linux: открыть raw socket
-fd, _ := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_TCP)
-// Собрать IP+TCP заголовок с неправильным TTL
-// Отправить до реального ClientHello
-```
-**Файл:** `internal/bypass/fake.go`
+Выполнено:
+- ✅ Fake packets через raw sockets (TTL + bad checksum)
+- ✅ nfqueue интеграция (kernel-level, все приложения)
+- ✅ TLS record layer splitting (tlsrec + combined)
+- ✅ Windows cross-compile (freenet-windows-amd64.exe)
+- ✅ GitHub Actions CI/CD (linux/amd64, arm64, armv7, windows/amd64)
 
 ---
 
-### 2. ECH (Encrypted Client Hello)
-**Что:** Шифрует SNI в TLS 1.3 handshake. DPI не видит какой сайт вы открываете.
-Поддерживается Cloudflare, многими CDN. Самая современная техника 2025–2026.
+## Phase 3 — Android APK 🔴
 
-**Как:**
-- Запросить ECH конфиг сервера через DNS (`HTTPS` запись)
-- Применить в ClientHello через `crypto/tls` с `ECHConfig`
-- Go 1.23+ поддерживает ECH нативно
+### Задача
+Нативное Android приложение с VpnService (без root).
 
-**Файл:** `internal/bypass/ech.go`
-
----
-
-### 3. nfqueue интеграция (Linux)
-**Что:** Интеграция с Linux netfilter queue — как в оригинальном zapret2.
-Позволяет модифицировать пакеты на уровне ядра без SOCKS5 прокси.
-
-**Библиотека:** `github.com/florianl/go-nfqueue`
-
-**Преимущество:** Работает для ВСЕХ приложений автоматически, без настройки прокси.
-
-**Файл:** `internal/proxy/nfqueue.go`
-
----
-
-### 4. WinDivert интеграция (Windows)
-**Что:** Обёртка для `winws.exe` (уже есть в репо `nfq2/windows/`).
-Позволяет перехватывать и модифицировать пакеты на Windows без SOCKS5.
-
-**Как:**
-```go
-// CGO обёртка для windivert.h
-// Или: запуск winws.exe как дочерний процесс с управлением через Go
-```
-**Файл:** `internal/proxy/windivert.go`
-
----
-
-## Приоритет: Средний 🟡
-
-### 5. Android APK
-**Что:** Нативное Android приложение с VpnService (без root).
-
-**Технологии:**
+### Технологии
 - `gomobile bind` → `.aar` библиотека из `internal/bypass`
 - Android Studio / Kotlin / Jetpack Compose
 - gVisor netstack + tun2socks для захвата трафика
-- Per-app фильтрация (обходить только нужные приложения)
+- Per-app фильтрация
 
-**Структура:**
+### Шаги реализации
+
+**1. Подготовить Go core для gomobile**
+
+```bash
+# Установить gomobile
+go install golang.org/x/mobile/cmd/gomobile@latest
+gomobile init
+
+# Сборка AAR
+gomobile bind \
+  -target android/arm64,android/arm \
+  -androidapi 26 \
+  -javapkg com.freenet.bypass \
+  -o android/app/libs/freenet.aar \
+  ./internal/bypass
+```
+
+**2. Создать Android проект** (`android/`)
 ```
 android/
-├── app/                    # Kotlin/Compose UI
+├── app/
 │   └── src/main/
-│       ├── DpiBypassVpnService.kt
-│       └── MainActivity.kt
-└── freenet-core/           # gomobile AAR
+│       ├── AndroidManifest.xml    # VpnService permission
+│       ├── java/com/freenet/
+│       │   ├── MainActivity.kt    # UI — большая кнопка
+│       │   ├── VpnService.kt      # VpnService + tun2socks
+│       │   └── BypassEngine.kt    # обёртка над freenet.aar
+│       └── res/layout/
+└── build.gradle
 ```
 
-**Команда сборки:**
-```bash
-gomobile bind -target android/arm64 -o android/app/libs/freenet.aar ./internal/bypass
-```
-
----
-
-### 6. Windows .exe установщик
-**Что:** Полноценный Windows установщик с GUI.
-
-**Компоненты:**
-- Go приложение с системным треем (`github.com/getlantern/systray`)
-- Встроенный `winws.exe` + WinDivert64.dll
-- NSIS скрипт → `freenet-setup.exe`
-- Установка как Windows Service (`golang.org/x/sys/windows/svc`)
-
-**Структура:**
-```
-windows/
-├── main_windows.go         # точка входа с systray
-├── service.go              # Windows Service
-├── windivert.go            # CGO обёртка
-└── installer/
-    └── freenet.nsi         # NSIS скрипт
+**3. VpnService логика**
+```kotlin
+class FreenetVpnService : VpnService() {
+    override fun onStartCommand(...): Int {
+        val builder = Builder()
+            .addAddress("10.0.0.1", 24)
+            .addRoute("0.0.0.0", 0)       // весь трафик
+            .setMtu(1500)
+        val vpnFd = builder.establish()
+        // tun2socks: преобразует TUN → SOCKS5 → bypass engine
+        startTun2Socks(vpnFd)
+    }
+}
 ```
 
 ---
 
-### 7. GitHub Actions CI/CD
-**Что:** Автоматическая сборка и релизы.
+## Phase 4 — Windows GUI + установщик 🟡
 
-**Файл:** `.github/workflows/build.yml`
+### Задача
+Нативный Windows .exe с системным треем и установщиком.
 
-```yaml
-# Кросс-компиляция:
-# - linux/amd64  → freenet-linux-amd64
-# - linux/arm64  → freenet-linux-arm64
-# - windows/amd64 → freenet-windows-amd64.exe
-# - android/arm64 → freenet.apk
+### Шаги реализации
+
+**1. Системный трей**
+```go
+// Библиотека: github.com/getlantern/systray
+import "github.com/getlantern/systray"
+
+func main() {
+    systray.Run(onReady, onExit)
+}
+
+func onReady() {
+    systray.SetIcon(iconData)
+    systray.SetTitle("FreeNet")
+    mToggle := systray.AddMenuItem("Включить", "")
+    mQuit   := systray.AddMenuItem("Выйти", "")
+    // ...
+}
+```
+
+**2. WinDivert интеграция** (пакетный перехват без SOCKS5)
+
+Библиотека WinDivert уже есть в репо (`nfq2/windows/`). Нужна CGO обёртка:
+```go
+//go:build windows
+// #include "windivert.h"
+import "C"
+```
+
+**3. NSIS установщик**
+```nsi
+; freenet-setup.nsi
+Name "FreeNet"
+OutFile "freenet-setup.exe"
+InstallDir "$PROGRAMFILES64\FreeNet"
+
+Section "Install"
+  SetOutPath "$INSTDIR"
+  File "freenet.exe"
+  File "WinDivert64.dll"
+  File "WinDivert64.sys"
+  CreateShortCut "$SMPROGRAMS\FreeNet.lnk" "$INSTDIR\freenet.exe"
+SectionEnd
 ```
 
 ---
 
-### 8. Антизапрет список
-**Что:** Интеграция с `antizapret.prostovpn.com` как альтернатива antifilter.
-antizapret умнее: группирует IP по подсетям, меньше правил.
+## Phase 5 — Качество и тесты 🟢
 
-**Файл:** `ipset/get_antizapret.sh` уже есть в zapret2 — нужно портировать на Go.
+### Unit тесты
 
----
+Приоритет тестирования:
 
-## Приоритет: Низкий 🟢
+```go
+// bypass/tls_test.go
+func TestParseClientHello(t *testing.T) {
+    // Тест на реальных TLS дампах с youtube.com, vk.com и т.д.
+}
 
-### 9. Telegram бот
-**Что:** Управление FreeNet через Telegram.
+// bypass/split_test.go
+func TestSplitPosition(t *testing.T) {
+    // Проверить что split происходит точно перед SNI
+}
 
-**Команды:**
+// bypass/hostlist_test.go
+func TestHostlistWildcard(t *testing.T) {
+    // "www.youtube.com" должен матчить "youtube.com"
+}
+
+// logs/ring_test.go
+func TestRingBuffer(t *testing.T) {
+    // Проверить FIFO порядок, capacity, subscribers
+}
 ```
-/status  — включён/выключен
-/on      — включить
-/off     — выключить
-/strategy split — сменить стратегию
-/stats   — статистика
+
+### Integration тесты
+
+```go
+// Запустить mock DPI server, проверить что split стратегия обходит его
+func TestBypassMockDPI(t *testing.T) { ... }
 ```
 
-**Библиотека:** `github.com/go-telegram-bot-api/telegram-bot-api`
-
 ---
 
-### 10. Unit тесты
-**Что:** Покрытие тестами ключевых компонентов.
+## Phase 6 — ECH (Encrypted Client Hello) 🟢
 
-**Приоритет тестирования:**
-- `bypass/tls_test.go` — парсинг ClientHello на реальных дампах
-- `bypass/split_test.go` — проверка позиции фрагментации
-- `bypass/hostlist_test.go` — wildcard matching
-- `logs/ring_test.go` — кольцевой буфер, подписчики
+Самая передовая техника 2026. Шифрует SNI в TLS 1.3.
 
----
+```go
+// Go 1.23+ поддерживает ECH нативно через crypto/tls
+tlsConfig := &tls.Config{
+    EncryptedClientHelloConfigList: echConfig,
+}
+```
 
-### 11. OpenWrt поддержка
-**Что:** Установка на роутеры OpenWrt (как в оригинальном zapret2).
-
-**Как:**
-- Кросс-компиляция под MIPS/ARM: `GOARCH=mips GOOS=linux`
-- init.d скрипт для OpenWrt
-- Размер бинарника критичен (нужен strip + UPX)
+Требует:
+- DNS HTTPS запись для получения ECH конфига сервера
+- Сервер должен поддерживать ECH (Cloudflare, многие CDN)
 
 ---
 
@@ -180,7 +191,10 @@ go run ./cmd/freenet -web :8080
 go test ./...
 
 # Собрать для всех платформ
-GOOS=linux   GOARCH=amd64 go build -o dist/freenet-linux-amd64   ./cmd/freenet
-GOOS=linux   GOARCH=arm64 go build -o dist/freenet-linux-arm64   ./cmd/freenet
-GOOS=windows GOARCH=amd64 go build -o dist/freenet-windows.exe   ./cmd/freenet
+make build   # см. Makefile (скоро)
+
+# или вручную:
+GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -o dist/freenet-linux-amd64   ./cmd/freenet
+GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -o dist/freenet-linux-arm64   ./cmd/freenet
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o dist/freenet-windows.exe   ./cmd/freenet
 ```
