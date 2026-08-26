@@ -536,3 +536,43 @@ Get Key failed: Given final block not properly padded.
 
 SHA-256 нового release-ключа (для Google Play Console):
 `A4:41:EA:E5:63:D0:0D:28:F3:28:FE:6C:3C:F5:7D:37:FE:85:56:C2:A2:13:AF:D9:11:32:66:89:1F:8A:61:30`
+
+---
+
+### 23. Критический баг Android: Go engine никогда не запускался
+
+**Пользователь:** "Без сервера не работает — установил на Android, нажал кнопку, ничего не работает"
+
+**Neo:** Нашёл корень проблемы через анализ кода `FreenetVpnService.kt`.
+
+**Два бага в gomobile reflection, из-за которых Go engine никогда не стартовал:**
+
+**Баг 1 — неверное имя класса:**
+```kotlin
+// БЫЛО (неверно):
+Class.forName("mobile.Mobile\$SocketProtector")  // класс не существует
+
+// СТАЛО (верно):
+Class.forName("mobile.SocketProtector")  // gomobile экспортирует интерфейсы
+                                          // как top-level Java классы
+```
+
+**Баг 2 — boxed vs primitive типы в getMethod():**
+```kotlin
+// БЫЛО (неверно):
+.getMethod("startVPN", Long::class.java, Int::class.java, ...)
+// Long::class.java = java.lang.Long (boxed) → NoSuchMethodException
+
+// СТАЛО (верно):
+.getMethod("startVPN", java.lang.Long.TYPE, java.lang.Integer.TYPE, ...)
+// Long.TYPE = long (primitive) — именно такие типы генерирует gomobile
+```
+
+**Что происходило:**
+1. `ClassNotFoundException` / `NoSuchMethodException` — оба тихо перехватывались
+2. `tryStartGoVPN()` возвращал `false`
+3. Fallback на `PacketForwarder` — пытался соединиться с `127.0.0.1:1080`
+4. На этом порту **ничего не было** (SOCKS5 proxy не запускался)
+5. VPN выглядел подключённым, но весь трафик падал
+
+**После фикса:** Go engine запускается → SOCKS5 на `127.0.0.1:1080` → `ForwardTUN` маршрутизирует трафик → DPI bypass работает. Внешний сервер не нужен — всё работает локально на устройстве.
