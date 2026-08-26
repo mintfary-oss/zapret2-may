@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -19,10 +20,11 @@ import (
 	"github.com/mintfary-oss/freenet/internal/config"
 	"github.com/mintfary-oss/freenet/internal/logs"
 	"github.com/mintfary-oss/freenet/internal/proxy"
+	"github.com/mintfary-oss/freenet/internal/telegram"
 	"github.com/mintfary-oss/freenet/internal/web"
 )
 
-const version = "1.6.0"
+const version = "1.8.0"
 
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
@@ -30,6 +32,9 @@ func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
 	doInstall := flag.Bool("install", false, "Windows: install as auto-start Windows service (run as Administrator)")
 	doUninstall := flag.Bool("uninstall", false, "Windows: remove Windows service")
+	// Telegram bot flags — override values from config.yaml when provided.
+	tgToken := flag.String("telegram-token", "", "Telegram bot token (overrides config); set to enable remote control")
+	tgChatID := flag.Int64("telegram-chat-id", 0, "restrict Telegram bot to this chat_id (0 = any)")
 	flag.Parse()
 
 	if *showVersion {
@@ -83,6 +88,22 @@ func main() {
 
 	log.Printf("web UI  → http://localhost%s", *webAddr)
 	log.Printf("SOCKS5  → %s", cfg.Proxy.ListenAddr)
+
+	// Start Telegram bot if a token is configured.
+	// CLI flags take precedence over values in config.yaml.
+	if *tgToken != "" {
+		cfg.Telegram.Token = *tgToken
+	}
+	if *tgChatID != 0 {
+		cfg.Telegram.AllowedChatID = *tgChatID
+	}
+	if cfg.Telegram.Token != "" {
+		bot := telegram.NewBot(cfg.Telegram.Token, srv, cfg.Telegram.AllowedChatID)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go bot.Run(ctx)
+		log.Printf("telegram: bot active (allowed_chat_id=%d)", cfg.Telegram.AllowedChatID)
+	}
 
 	// On Windows (interactive), open the browser and show the tray icon.
 	// On Linux/macOS or when running as a service, just wait for a signal.

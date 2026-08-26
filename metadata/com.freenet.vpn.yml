@@ -26,6 +26,7 @@ Description: |-
   * UDP relay — Discord, Steam, видеозвонки
   * Виджет 2×1 на рабочем столе
   * Автозапуск при загрузке устройства
+  * Telegram бот — управление сервером удалённо (/status /on /off /strategy /stats)
 
   Сборка без gomobile AAR автоматически использует чистый Kotlin fallback
   (PacketForwarder), который обеспечивает базовое TCP-проксирование.
@@ -46,9 +47,30 @@ Builds:
     # No prebuild script needed — the AAR dependency is declared as optional
     # in app/build.gradle.kts: if (file("libs/mobile.aar").exists()) { ... }
 
+  - versionName: 1.7.0
+    versionCode: 170
+    commit: freenet-v1.7.0
+    subdir: go-freenet/android
+    gradle:
+      - yes
+    # Phase 8: F-Droid manifest, OpenWrt init.d, Android instrumented tests,
+    # Go benchmarks, MIPS/MIPSle CI builds.
+
+  - versionName: 1.8.0
+    versionCode: 180
+    commit: freenet-v1.8.0
+    subdir: go-freenet/android
+    gradle:
+      - yes
+    # Phase 9: Android release APK signing, Telegram bot for remote control,
+    # test coverage 60%+, docs updated.
+    # Signing uses environment variables (KEYSTORE_BASE64, STORE_PASSWORD,
+    # KEY_ALIAS, KEY_PASSWORD); F-Droid builds unsigned and re-signs with the
+    # F-Droid key as usual.
+
 AutoUpdateMode: Version freenet-v%v
 UpdateCheckMode: Tags ^freenet-v
 UpdateCheckData: go-freenet/android/app/build.gradle.kts|versionCode\s*=\s*(\d+)|.|versionName\s*=\s*"([^"]+)"
 
-CurrentVersion: 1.6.0
-CurrentVersionCode: 160
+CurrentVersion: 1.8.0
+CurrentVersionCode: 180

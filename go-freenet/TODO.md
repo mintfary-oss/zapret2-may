@@ -14,7 +14,7 @@
 | 6 | Windows WinDivert (kernel bypass) | v1.5.2 | ✅ Завершена |
 | 7 | Android: UDP relay, split tunnel, виджет | v1.6.0 | ✅ Завершена |
 | 8 | F-Droid + OpenWrt + качество | v1.7.0 | ✅ Завершена |
-| 9 | Telegram бот | — | 🔄 Следующая |
+| 9 | Telegram бот + Release signing + тесты | v1.8.0 | ✅ Завершена |
 
 ---
 
