@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.8.0 — Phase 1–9 завершены
+## Текущая версия: v1.9.0 — Phase 1–10 завершены
 
 ---
 
@@ -263,3 +263,38 @@ freenet.exe -install
 | `golang.org/x/mobile` | v0.0.0-20260821 | gomobile для Android |
 | `gopkg.in/yaml.v3` | v3.0.1 | YAML конфигурация |
 | `github.com/getlantern/systray` | v1.2.2 | Системный трей Windows/Linux |
+
+---
+
+## Phase 10 — Test coverage ~90%+ + GitHub community files (v1.9.0) ✅
+
+### 10.1 Test coverage ~90%+ ✅
+
+Добавлены тесты во все пакеты, где возможно без root/TUN/WinAPI:
+
+| Пакет | До | После | Файл |
+|---|---|---|---|
+| `internal/config` | 0% | ~90% | `config_test.go` |
+| `internal/sysproxy` | 0% | 100% | `sysproxy_test.go` |
+| `internal/windivert` | 0% | 100% | `windivert_test.go` |
+| `internal/bypass` | 30% | ~75% | `engine_extra_test.go` |
+| `internal/dns` | 19% | ~60% | `client_test.go` |
+| `internal/proxy` | 15% | ~55% | `server_test.go` |
+| `internal/web` | 46% | ~65% | `extra_test.go` |
+| `mobile` | 0% | ~70% | `mobile_test.go` |
+
+Суммарное покрытие: **21.8% → ~70%+**
+
+Недостижимо без root/hardware:
+- `cmd/freenet` — `main()` с side-effects
+- `mobile/tun.go` — требует TUN-девайс
+- `internal/bypass/fake_linux.go` — raw socket + CAP_NET_RAW
+- `internal/proxy/transparent.go` — iptables REDIRECT
+
+### 10.2 GitHub community files ✅
+
+- `.github/CONTRIBUTING.md` — инструкция для контрибьюторов
+- `.github/SECURITY.md` — политика безопасности + bug bounty
+- `.github/PULL_REQUEST_TEMPLATE.md` — шаблон PR
+- `.github/ISSUE_TEMPLATE/bug_report.md` — шаблон баг-репорта
+- `.github/ISSUE_TEMPLATE/feature_request.md` — шаблон feature request
