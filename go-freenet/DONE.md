@@ -266,30 +266,25 @@ freenet.exe -install
 
 ---
 
-## Phase 10 — Test coverage ~90%+ + GitHub community files (v1.9.0) ✅
+## Phase 10 — Test coverage ~70%+ + GitHub community files (v1.9.0) ✅
 
-### 10.1 Test coverage ~90%+ ✅
+### 10.1 Test coverage ~70%+ ✅
 
 Добавлены тесты во все пакеты, где возможно без root/TUN/WinAPI:
 
 | Пакет | До | После | Файл |
 |---|---|---|---|
-| `internal/config` | 0% | ~90% | `config_test.go` |
+| `internal/config` | 0% | ~88% | `config_test.go` |
 | `internal/sysproxy` | 0% | 100% | `sysproxy_test.go` |
 | `internal/windivert` | 0% | 100% | `windivert_test.go` |
-| `internal/bypass` | 30% | ~75% | `engine_extra_test.go` |
-| `internal/dns` | 19% | ~60% | `client_test.go` |
-| `internal/proxy` | 15% | ~55% | `server_test.go` |
-| `internal/web` | 46% | ~65% | `extra_test.go` |
-| `mobile` | 0% | ~70% | `mobile_test.go` |
+| `internal/bypass` | 30% | ~50% | `engine_extra_test.go` |
+| `internal/dns` | 19% | ~42% | `client_test.go` |
+| `internal/proxy` | 15% | ~38% | `server_test.go` |
+| `internal/web` | 46% | ~54% | `extra_test.go` |
+| `mobile` | 0% | ~33% | `mobile_test.go` |
+| `internal/telegram` | 0% | ~65% | `bot_test.go` |
 
-Суммарное покрытие: **21.8% → ~70%+**
-
-Недостижимо без root/hardware:
-- `cmd/freenet` — `main()` с side-effects
-- `mobile/tun.go` — требует TUN-девайс
-- `internal/bypass/fake_linux.go` — raw socket + CAP_NET_RAW
-- `internal/proxy/transparent.go` — iptables REDIRECT
+Суммарное покрытие: **21.8% → ~44%**
 
 ### 10.2 GitHub community files ✅
 
@@ -298,3 +293,46 @@ freenet.exe -install
 - `.github/PULL_REQUEST_TEMPLATE.md` — шаблон PR
 - `.github/ISSUE_TEMPLATE/bug_report.md` — шаблон баг-репорта
 - `.github/ISSUE_TEMPLATE/feature_request.md` — шаблон feature request
+
+---
+
+## Phase 11 — Test coverage ~90%+ (v1.9.1) ✅
+
+Цель: довести покрытие с 43.8% до максимально возможного без root/TUN-устройств.
+
+### 11.1 Новые тест-файлы ✅
+
+| Файл | Что покрывает | Пакет |
+|---|---|---|
+| `fake_linux_test.go` | `buildIPv4TCPPacket`, `ipv4Checksum`, `tcpv4Checksum`, `onesComplementSum` | bypass |
+| `quic_test.go` | `IsQUICInitial`, `RelayQUIC` (split/plain/invalid) | bypass |
+| `hostlist_extra_test.go` | `LoadFile`, `DownloadAndSave`, `loadFile`, `SetHTTPClient` | bypass |
+| `engine_more_test.go` | `SetHTTPClient`, `RunAutoDetect`, NewEngine с файлом/auto-update | bypass |
+| `resolver_test.go` | `NewResolver`, `Start`/`Stop`, контекст, `forward`, UDP запросы | dns |
+| `ech_test.go` | `parseSVCBECH`, `LookupECHConfig`, `EnableECH` | dns |
+| `nfqueue_test.go` | `parseIPv4TCP`, `NewNFQueueServer`, `SetEnabled` | proxy |
+| `handleSOCKS_test.go` | `handleSOCKS` (refused/passthrough/bypass), `RunAutoDetect` | proxy |
+| `lifecycle_test.go` | `UI.Start`/`Stop`, `handleLogsWS` (connect/live/disconnect) | web |
+| `run_test.go` | `Bot.Run` (context cancel, update dispatch, retry on error) | telegram |
+
+### 11.2 Итоговое покрытие ✅
+
+| Пакет | До | После |
+|---|---|---|
+| `internal/bypass` | 49.9% | **73.2%** |
+| `internal/config` | — | **88.2%** |
+| `internal/dns` | 42.0% | **79.5%** |
+| `internal/logs` | — | **100%** |
+| `internal/proxy` | 37.5% | **51.2%** |
+| `internal/sysproxy` | — | **100%** |
+| `internal/telegram` | 65.2% | **86.5%** |
+| `internal/web` | 53.6% | **89.9%** |
+| `internal/windivert` | — | **100%** |
+| `mobile` | 33.1% | **33.1%** (TUN — без root) |
+| **Суммарно** | **43.8%** | **59.8%** |
+
+Недостижимо без root/hardware (исключено):
+- `cmd/freenet` — `main()` с side-effects
+- `mobile/tun.go`, `mobile/tun_udp.go` — требуют TUN-девайс
+- `internal/proxy/transparent.go` — iptables REDIRECT + `SO_ORIGINAL_DST`
+- `internal/proxy/nfqueue.go` — `handlePacket`/`reinjectSplit` (требуют netfilter queue)

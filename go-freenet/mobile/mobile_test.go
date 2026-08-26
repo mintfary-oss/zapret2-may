@@ -103,7 +103,7 @@ func TestTCPChecksum_PayloadAffectsResult(t *testing.T) {
 func TestUDPChecksum_NotZero(t *testing.T) {
 	srcIP := net.IP{10, 0, 0, 1}.To4()
 	dstIP := net.IP{8, 8, 4, 4}.To4()
-	seg := make([]byte, 8)     // minimal UDP header
+	seg := make([]byte, 8)                  // minimal UDP header
 	binary.BigEndian.PutUint16(seg[4:6], 8) // length = 8
 	cs := udpChecksum(srcIP, dstIP, seg)
 	// RFC 768: 0 means "not computed"; our implementation returns 0xFFFF instead.
