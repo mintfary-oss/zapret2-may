@@ -15,6 +15,7 @@
 | 7 | Android: UDP relay, split tunnel, виджет | v1.6.0 | ✅ Завершена |
 | 8 | F-Droid + OpenWrt + качество | v1.7.0 | ✅ Завершена |
 | 9 | Telegram бот + Release signing + тесты | v1.8.0 | ✅ Завершена |
+| 10 | Test coverage ~70%+ + GitHub files | v1.9.0 | ✅ Завершена |
 
 ---
 

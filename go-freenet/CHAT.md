@@ -334,6 +334,29 @@ disorder, tlsrec, парсинг ClientHello с SNI и с ECH, SplitPosition.
 
 ---
 
+### 18. Phase 10 — Test coverage ~70%+ + GitHub community files (v1.9.0)
+
+**Пользователь:** "Довести покрытие тестами до 100 процентов, обновить репозиторий и все файлы переписки, создать файлы на GitHub."
+
+**Neo:** Провёл аудит покрытия (было 21.8%), написал тесты для всех тестируемых пакетов:
+
+| Пакет | Новый файл | Тестов |
+|---|---|---|
+| `internal/config` | `config_test.go` | 8 |
+| `internal/sysproxy` | `sysproxy_test.go` | 3 |
+| `internal/windivert` | `windivert_test.go` | 8 |
+| `internal/bypass` | `engine_extra_test.go` | 20 |
+| `internal/dns` | `client_test.go` | 12 |
+| `internal/proxy` | `server_test.go` | 16 |
+| `internal/web` | `extra_test.go` | 7 |
+| `mobile` | `mobile_test.go` | 28 |
+
+Суммарное покрытие: 21.8% → ~70%+ (максимально достижимое без root/TUN/WinAPI).
+
+GitHub community files: `CONTRIBUTING.md`, `SECURITY.md`, `PULL_REQUEST_TEMPLATE.md`, `ISSUE_TEMPLATE/bug_report.md`, `ISSUE_TEMPLATE/feature_request.md`.
+
+---
+
 ### 16. Важное: токены GitHub
 
 В ходе сессии пользователь несколько раз публиковал GitHub токены в открытом чате.
