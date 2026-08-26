@@ -277,7 +277,9 @@ class FreenetVpnService : VpnService() {
         val eng = goEngine ?: return false
         return try {
             // Wrap Android's VpnService.protect() as a gomobile SocketProtector.
-            val protectorCls = Class.forName("mobile.Mobile\$SocketProtector")
+            // gomobile: interfaces are top-level Java classes, NOT nested in Mobile.
+            // Correct: "mobile.SocketProtector"  Wrong: "mobile.Mobile$SocketProtector"
+            val protectorCls = Class.forName("mobile.SocketProtector")
             val protector = java.lang.reflect.Proxy.newProxyInstance(
                 protectorCls.classLoader,
                 arrayOf(protectorCls)
@@ -286,15 +288,22 @@ class FreenetVpnService : VpnService() {
                 protect(fd)
             }
 
+            // gomobile uses Java primitive types (long, int), not boxed types.
+            // Long::class.java = java.lang.Long (boxed) → NoSuchMethodException
+            // java.lang.Long.TYPE = long (primitive)    → correct
             eng.javaClass
-                .getMethod("startVPN", Long::class.java, Int::class.java, protectorCls)
+                .getMethod("startVPN",
+                    java.lang.Long.TYPE,
+                    java.lang.Integer.TYPE,
+                    protectorCls)
                 .invoke(eng, tunFd, SOCKS5_PORT, protector)
 
             true
         } catch (e: ClassNotFoundException) {
+            Log.w(TAG, "Go AAR absent (mobile.SocketProtector) — using Kotlin fallback")
             false
         } catch (e: Exception) {
-            Log.e(TAG, "tryStartGoVPN: $e")
+            Log.e(TAG, "tryStartGoVPN failed: $e")
             false
         }
     }
