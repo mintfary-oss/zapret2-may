@@ -297,7 +297,44 @@ IPv6: убран маршрут `::/0` из `VpnService.Builder` → IPv6 тра
 
 ---
 
-### 14. Важное: токены GitHub
+### 15. Phase 8 — F-Droid + OpenWrt + качество (ЗАВЕРШЕНА v1.7.0)
+
+**Пользователь:** "Проверь обновила репозиторий и погнали дальше"
+
+**Neo:** Проверил — Phase 7 зафиксирована, всё актуально. Реализовал Phase 8:
+
+**8.1 F-Droid манифест (`metadata/com.freenet.vpn.yml`)**
+Создан файл метаданных для F-Droid в корне репозитория. Ключевое решение:
+`build.gradle.kts` уже объявляет `mobile.aar` как опциональный (условный
+`if (file("libs/mobile.aar").exists())`), а `FreenetVpnService.kt` при
+отсутствии AAR автоматически переключается на `PacketForwarder.kt` через
+reflection — gomobile не нужен, F-Droid собирает чистый Kotlin APK.
+Обновлены `versionCode = 160`, `versionName = "1.6.0"` в `build.gradle.kts`.
+
+**8.2 Android integration tests (27 тестов)**
+- `SplitTunnelConfigTest.kt` — 10 тестов SharedPreferences: default, persist,
+  roundtrip для всех трёх режимов, overwrite, corrupt JSON, большой список.
+- `VpnServiceTest.kt` — 7 тестов класса/интентов/isRunning без VPN permission.
+- `PacketForwarderTest.kt` — 10 тестов IP/TCP checksum через reflection:
+  `ipChecksum`, `tcpChecksum`, `buildTcpPacket` (размер, поля, корректность).
+
+**8.3 OpenWrt procd init.d скрипт (`go-freenet/init.d/openwrt/freenet`)**
+Скрипт для OpenWrt 21.02+: `USE_PROCD=1`, `respawn`, авто-создание дефолтного
+YAML конфига, reload через `SIGHUP`, `service_triggers` на сетевые события,
+helper `uci_get_option` для настройки через UCI.
+
+**8.4 Go bypass benchmarks (`internal/bypass/relay_bench_test.go`)**
+12 бенчмарков через `net.Pipe()`: plain, split (с TLS hello / без / с хвостом),
+disorder, tlsrec, парсинг ClientHello с SNI и с ECH, SplitPosition.
+Результат на arm64: `ParseClientHello` — 58 ns/op, 1.4 GB/s, 2 allocs.
+
+**8.5 CI: OpenWrt MIPS сборки**
+Добавлены в матрицу CI: `linux/mips` и `linux/mipsle` (оба `GOMIPS=softfloat`).
+Обновлена таблица платформ в release notes.
+
+---
+
+### 16. Важное: токены GitHub
 
 В ходе сессии пользователь несколько раз публиковал GitHub токены в открытом чате.
 Все использованные токены необходимо немедленно отозвать:

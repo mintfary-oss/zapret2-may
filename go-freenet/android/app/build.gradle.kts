@@ -12,8 +12,8 @@ android {
         applicationId = "com.freenet.vpn"
         minSdk = 26       // Android 8.0 — minimum for reliable VpnService
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 160
+        versionName = "1.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -67,6 +67,11 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
     debugImplementation(libs.androidx.ui.tooling)
+
+    // Instrumented (on-device) tests.
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 
     // FreeNet Go DPI bypass engine (AAR built via gomobile bind).
     // Run scripts/build-android.sh to generate app/libs/mobile.aar.
