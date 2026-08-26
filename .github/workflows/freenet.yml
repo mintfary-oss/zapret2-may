@@ -116,17 +116,28 @@ jobs:
             -o dist/mobile.aar \
             ./mobile
 
-      - name: Build Android APK
+      - name: Build Android APK (debug + release)
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.3.11579264
+          # Release signing secrets — set in repo Settings → Secrets.
+          # When absent the release build is produced unsigned (fine for
+          # F-Droid; F-Droid re-signs with its own key).
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD:  ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS:       ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD:    ${{ secrets.KEY_PASSWORD }}
         run: |
           mkdir -p android/app/libs
           cp dist/mobile.aar android/app/libs/mobile.aar
           cd android
           gradle wrapper --gradle-version=8.11.1 --no-daemon
           chmod +x ./gradlew
+          # Build debug APK (always).
           ./gradlew assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk ../dist/freenet-android.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../dist/freenet-android-debug.apk
+          # Build release APK (signed when secrets present, unsigned otherwise).
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release*.apk ../dist/freenet-android.apk
 
       - uses: actions/upload-artifact@v4
         with:
@@ -137,6 +148,11 @@ jobs:
         with:
           name: freenet-android.apk
           path: go-freenet/dist/freenet-android.apk
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freenet-android-debug.apk
+          path: go-freenet/dist/freenet-android-debug.apk
           retention-days: 30
 
   # ── Linux installer bundle ─────────────────────────────────────────────────

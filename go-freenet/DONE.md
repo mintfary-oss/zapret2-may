@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.7.0 — Phase 1–8 завершены
+## Текущая версия: v1.8.0 — Phase 1–9 завершены
 
 ---
 
@@ -227,6 +227,28 @@ freenet.exe -install
 # Скачать freenet-android.apk с GitHub Releases → установить
 # Или собрать: bash scripts/build-release-apk.sh
 ```
+
+
+## Phase 9 — Telegram бот + Release signing + тесты (v1.8.0) ✅
+
+### 9.1 Android release signing
+`build.gradle.kts` — `signingConfigs` на env-переменных (`KEYSTORE_BASE64`,
+`STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`). CI собирает signed release APK
+автоматически, unsigned для F-Droid.
+
+### 9.2 Test coverage ~60%+
+- `internal/bypass/relay_test.go` — 10 тестов (split/tlsrec/disorder через net.Pipe)
+- `internal/proxy/socks5_test.go` — 11 тестов (handshake/request/stats)
+- `internal/web/ui_test.go` — 12 тестов (status/toggle/strategy/autodetect/index)
+- `internal/telegram/bot_test.go` — 17 тестов (commands/dispatch/HTTP)
+
+### 9.3 Telegram бот
+`internal/telegram/bot.go` — long-polling, без внешних зависимостей.
+Команды: `/status /on /off /strategy <name> /stats`.
+Интеграция: `TelegramConfig` в `config.go`, флаги `-telegram-token`,
+`-telegram-chat-id` в `main.go`.
+
+---
 
 ---
 

@@ -339,3 +339,33 @@ disorder, tlsrec, парсинг ClientHello с SNI и с ECH, SplitPosition.
 В ходе сессии пользователь несколько раз публиковал GitHub токены в открытом чате.
 Все использованные токены необходимо немедленно отозвать:
 https://github.com/settings/tokens
+
+---
+
+### 17. Phase 9 — v1.8.0 (Telegram бот + Release signing + тесты)
+
+**Что сделано:**
+
+**9.1 Android release signing**
+- `build.gradle.kts`: `signingConfigs` через env-переменные (`KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`)
+- `versionCode = 180`, `versionName = "1.8.0"`
+- CI (`freenet.yml`): `assembleRelease` + signed/unsigned APK артефакты
+
+**9.2 Test coverage ~60%+** (50 новых тестов)
+- `internal/bypass/relay_test.go` — 10 тестов: relaySplit, relayTLSRec, relayDisorder через `net.Pipe()`
+- `internal/proxy/socks5_test.go` — 11 тестов: SOCKS5 handshake, ReadRequest (IPv4/IPv6/domain), Stats
+- `internal/web/ui_test.go` — 12 тестов: HTTP handlers (/api/status, /api/stats, /api/toggle, /api/strategy, /api/autodetect, /)
+- `internal/telegram/bot_test.go` — 17 тестов: команды, dispatch, allowedChatID, sendMessage, getUpdates
+
+**9.3 Telegram бот** (`internal/telegram/bot.go`)
+- Long-polling, чистый `net/http`, 0 внешних зависимостей
+- Команды: `/help /status /on /off /strategy <name> /stats`
+- `TelegramConfig{Token, AllowedChatID}` в `config.go`
+- Флаги `-telegram-token` и `-telegram-chat-id` в `main.go`
+- version = "1.8.0" в main.go
+
+**9.4 F-Droid манифест** (`metadata/com.freenet.vpn.yml`)
+- v1.8.0 добавлен в `Builds:`, `CurrentVersion = 1.8.0`
+- Описание обновлено (Telegram бот)
+
+`go build ./... && go vet ./... && go test ./...` — все тесты PASS.

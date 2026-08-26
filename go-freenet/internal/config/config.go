@@ -14,6 +14,19 @@ type Config struct {
 	Hostlist HostlistConfig `yaml:"hostlist"`
 	NFQueue  NFQueueConfig  `yaml:"nfqueue"`
 	DNS      DNSConfig      `yaml:"dns"`
+	Telegram TelegramConfig `yaml:"telegram"`
+}
+
+// TelegramConfig enables the optional Telegram bot for remote management.
+// The bot is disabled when Token is empty.
+type TelegramConfig struct {
+	// Token is the Telegram Bot API token obtained from @BotFather.
+	// Leave empty to disable the bot.
+	Token string `yaml:"token"`
+	// AllowedChatID restricts control to a specific Telegram chat / user ID.
+	// 0 means any user who can message the bot can control it (suitable for
+	// private bots where the token itself is the access control).
+	AllowedChatID int64 `yaml:"allowed_chat_id"`
 }
 
 // DNSConfig controls the built-in DNS-over-HTTPS protection.
