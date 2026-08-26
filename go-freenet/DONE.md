@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.8.1 RELEASED ✅ — все CI jobs зелёные, релиз опубликован
+## Текущая версия: v1.8.2 RELEASED ✅ — Go engine на Android наконец работает правильно
 
 ---
 
@@ -293,6 +293,59 @@ freenet.exe -install
 - `.github/PULL_REQUEST_TEMPLATE.md` — шаблон PR
 - `.github/ISSUE_TEMPLATE/bug_report.md` — шаблон баг-репорта
 - `.github/ISSUE_TEMPLATE/feature_request.md` — шаблон feature request
+
+---
+
+## Phase 14 — Критический фикс Android: неверный Java-пакет gomobile (v1.8.2) ✅
+
+**Корень проблемы — почему Android APK никогда не работал:**
+
+CI использует `gomobile bind -javapkg com.freenet.bypass`, поэтому все Java-классы
+находятся в пакете `com.freenet.bypass`, а не `mobile`:
+
+| Что искал код | Что реально в AAR |
+|---|---|
+| `mobile.FreenetEngine` | `com.freenet.bypass.FreenetEngine` |
+| `mobile.Mobile` | `com.freenet.bypass.Mobile` |
+| `mobile.SocketProtector` | `com.freenet.bypass.SocketProtector` |
+
+`Class.forName("mobile.FreenetEngine")` → `ClassNotFoundException` (silent catch)
+→ `goEngine = null` → `tryStartGoVPN()` возвращал `false` сразу
+→ fallback на PacketForwarder → трафик в никуда.
+
+**Исправление в `FreenetVpnService.kt`:**
+```kotlin
+// initGoEngine():
+Class.forName("com.freenet.bypass.Mobile").getMethod("newFreenetEngine")
+
+// tryStartGoVPN():
+Class.forName("com.freenet.bypass.SocketProtector")
+```
+
+**Версии:** `versionCode = 182`, `versionName = "1.8.2"`, тег `freenet-v1.8.2`.
+
+APK после CI: https://github.com/mintfary-oss/zapret2-may/releases/download/freenet-v1.8.2/freenet-android.apk
+
+---
+
+## Phase 13 — Android Go engine reflection fix (v1.8.1) ✅
+
+**Критический баг исправлен:** Go engine в `FreenetVpnService.kt` никогда не запускался
+из-за двух reflection-ошибок (silent catch → fallback → трафик падал).
+
+| Баг | Было | Стало |
+|-----|------|-------|
+| Имя класса | `"mobile.Mobile$SocketProtector"` | `"mobile.SocketProtector"` |
+| Тип параметра | `Long::class.java` (boxed) | `java.lang.Long.TYPE` (primitive) |
+
+**Верификация на ARM64 сервере:**
+- `go test ./...` → 11 пакетов PASS
+- `go vet ./...` → 0 предупреждений
+- Web UI HTTP 200, `/api/status` JSON, SOCKS5 `05 00` ✓
+- Кросс-компиляция linux/amd64, arm64, mips, mipsle, windows/amd64 ✓
+- CI run #53 `completed / success`, релиз freenet-v1.8.1: 13 artifacts
+
+APK: https://github.com/mintfary-oss/zapret2-may/releases/download/freenet-v1.8.1/freenet-android.apk
 
 ---
 

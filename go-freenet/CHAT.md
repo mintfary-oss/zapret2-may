@@ -391,6 +391,46 @@ GitHub community files: `CONTRIBUTING.md`, `SECURITY.md`, `PULL_REQUEST_TEMPLATE
 
 ---
 
+### 25. Phase 14 — Критический фикс Android: неверный Java-пакет gomobile (v1.8.2)
+
+**Пользователь:** "Установил — ничего не изменилось, не работает"
+
+**Neo:** Нашёл настоящий корень проблемы через анализ CI workflow и кода.
+
+**Причина:** `build-android.sh` и CI используют `-javapkg com.freenet.bypass` при `gomobile bind`.
+Из-за этого все Java-классы в AAR находятся в пакете `com.freenet.bypass`, а не `mobile`.
+
+Код в `FreenetVpnService.kt` искал классы с неверными именами:
+
+```kotlin
+// ❌ БЫЛО — во всех предыдущих версиях:
+Class.forName("mobile.FreenetEngine")      // ClassNotFoundException → goEngine = null
+Class.forName("mobile.Mobile")             // ClassNotFoundException
+Class.forName("mobile.SocketProtector")    // ClassNotFoundException
+
+// ✅ СТАЛО (v1.8.2):
+Class.forName("com.freenet.bypass.Mobile")           // factory class
+Class.forName("com.freenet.bypass.SocketProtector")  // interface
+```
+
+**Цепочка провала:**
+1. `Class.forName("mobile.FreenetEngine")` → `ClassNotFoundException` (silent catch)
+2. `goEngine` остаётся `null`
+3. `tryStartGoVPN()` немедленно возвращает `false` (проверка `goEngine ?: return false`)
+4. Fallback на `PacketForwarder.kt` → пытается подключиться к `127.0.0.1:1080`
+5. На этом порту ничего нет (SOCKS5 прокси не запустился)
+6. VPN "подключён", но весь трафик падает
+
+**Файлы изменены:**
+- `FreenetVpnService.kt` — правильные имена классов
+- `build.gradle.kts` — versionCode=182, versionName="1.8.2"
+- `cmd/freenet/main.go` — version="1.8.2"
+- `metadata/com.freenet.vpn.yml` — добавлена запись v1.8.2
+
+**Тег:** `freenet-v1.8.2` → CI соберёт новый APK.
+
+---
+
 ### 24. Phase 13 — Полная верификация кода и сборок (v1.8.1)
 
 **Пользователь:** "Проверь у себя на сервере весь код и все сборки — всё не работает"

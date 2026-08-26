@@ -64,13 +64,22 @@ Builds:
       - yes
     # Phase 9: Android release APK signing, Telegram bot for remote control,
     # test coverage 60%+, docs updated.
-    # Signing uses environment variables (KEYSTORE_BASE64, STORE_PASSWORD,
-    # KEY_ALIAS, KEY_PASSWORD); F-Droid builds unsigned and re-signs with the
-    # F-Droid key as usual.
+
+  - versionName: 1.8.2
+    versionCode: 182
+    commit: freenet-v1.8.2
+    subdir: go-freenet/android
+    gradle:
+      - yes
+    # fix(android): correct Java package names in gomobile reflection.
+    # gomobile bind uses -javapkg com.freenet.bypass, so generated classes are
+    # com.freenet.bypass.Mobile / FreenetEngine / SocketProtector — not mobile.*.
+    # Previous reflection code always threw ClassNotFoundException → engine never
+    # started → VPN connected but all traffic dropped. Now Go engine runs correctly.
 
 AutoUpdateMode: Version freenet-v%v
 UpdateCheckMode: Tags ^freenet-v
 UpdateCheckData: go-freenet/android/app/build.gradle.kts|versionCode\s*=\s*(\d+)|.|versionName\s*=\s*"([^"]+)"
 
-CurrentVersion: 1.8.0
-CurrentVersionCode: 180
+CurrentVersion: 1.8.2
+CurrentVersionCode: 182

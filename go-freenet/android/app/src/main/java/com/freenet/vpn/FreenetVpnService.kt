@@ -228,11 +228,16 @@ class FreenetVpnService : VpnService() {
      */
     private fun initGoEngine() {
         try {
-            val cls = Class.forName("mobile.FreenetEngine")
-            val newEngine = Class.forName("mobile.Mobile")
+            // gomobile bind uses -javapkg com.freenet.bypass, so all generated
+            // Java types live in the com.freenet.bypass package:
+            //   com.freenet.bypass.Mobile       — package-level factory class
+            //   com.freenet.bypass.FreenetEngine — engine struct
+            //   com.freenet.bypass.SocketProtector — SocketProtector interface
+            // Using the old "mobile.*" names always throws ClassNotFoundException.
+            val newEngine = Class.forName("com.freenet.bypass.Mobile")
                 .getMethod("newFreenetEngine")
             goEngine = newEngine.invoke(null)
-            Log.i(TAG, "Go engine initialised")
+            Log.i(TAG, "Go engine initialised (com.freenet.bypass.FreenetEngine)")
         } catch (e: ClassNotFoundException) {
             Log.w(TAG, "Go engine AAR not found — bypass disabled (run scripts/build-android.sh)")
         } catch (e: Exception) {
@@ -276,10 +281,13 @@ class FreenetVpnService : VpnService() {
     private fun tryStartGoVPN(tunFd: Long): Boolean {
         val eng = goEngine ?: return false
         return try {
-            // Wrap Android's VpnService.protect() as a gomobile SocketProtector.
-            // gomobile: interfaces are top-level Java classes, NOT nested in Mobile.
-            // Correct: "mobile.SocketProtector"  Wrong: "mobile.Mobile$SocketProtector"
-            val protectorCls = Class.forName("mobile.SocketProtector")
+            // gomobile bind uses -javapkg com.freenet.bypass, so the generated
+            // SocketProtector interface is com.freenet.bypass.SocketProtector,
+            // NOT "mobile.SocketProtector" (old incorrect name).
+            //
+            // gomobile generates methods with Java primitive types (long, int).
+            // Must use Long.TYPE / Integer.TYPE — NOT Long::class.java (boxed).
+            val protectorCls = Class.forName("com.freenet.bypass.SocketProtector")
             val protector = java.lang.reflect.Proxy.newProxyInstance(
                 protectorCls.classLoader,
                 arrayOf(protectorCls)
@@ -288,9 +296,6 @@ class FreenetVpnService : VpnService() {
                 protect(fd)
             }
 
-            // gomobile uses Java primitive types (long, int), not boxed types.
-            // Long::class.java = java.lang.Long (boxed) → NoSuchMethodException
-            // java.lang.Long.TYPE = long (primitive)    → correct
             eng.javaClass
                 .getMethod("startVPN",
                     java.lang.Long.TYPE,
@@ -300,7 +305,7 @@ class FreenetVpnService : VpnService() {
 
             true
         } catch (e: ClassNotFoundException) {
-            Log.w(TAG, "Go AAR absent (mobile.SocketProtector) — using Kotlin fallback")
+            Log.w(TAG, "Go AAR absent (com.freenet.bypass.SocketProtector) — using Kotlin fallback")
             false
         } catch (e: Exception) {
             Log.e(TAG, "tryStartGoVPN failed: $e")

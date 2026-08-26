@@ -71,15 +71,15 @@ FreeNet Go
 │   ├── Linux/Docker      systemd сервис + Docker Compose         ✅
 │   ├── Windows           WinDivert + служба + трей + авто-прокси ✅
 │   ├── Android           VpnService + UDP relay + per-app + widget ✅
-│   └── OpenWrt           init.d скрипт                          🔄
+│   └── OpenWrt           init.d скрипт                          ✅
 │
 └── Интерфейсы
     ├── web/              Веб-UI + WebSocket + DoH + ECH статус   ✅
     ├── android/          Compose UI + SplitTunnelCard + Widget   ✅
-    └── telegram/         Telegram бот управление                 🔄
+    └── telegram/         Telegram бот управление                 ✅
 ```
 
-Обозначения: ✅ готово · 🔄 в плане
+Обозначения: ✅ готово
 
 ---
 
@@ -157,24 +157,47 @@ FreeNet Go
 - `FreeNetWidget.kt` — 2×1 кнопка на рабочем столе
 - `SplitTunnelCard` в Compose UI — список приложений с поиском
 
----
+### Фаза 8: Качество и F-Droid ✅ ЗАВЕРШЕНА (v1.7.0)
 
-## Следующие фазы (планируется)
+- F-Droid манифест `metadata/com.freenet.vpn.yml` (сборка без gomobile AAR)
+- 27 Android instrumented тестов (SharedPreferences, VpnService, Checksum)
+- OpenWrt procd init.d скрипт (respawn, UCI, SIGHUP reload)
+- 12 Go бенчмарков bypass стратегий (ParseClientHello: 58 ns/op, 1.4 GB/s)
+- CI матрица: linux/mips + linux/mipsle (softfloat)
 
-### Фаза 8: Качество и F-Droid 🔄
+### Фаза 9: Telegram бот + Release signing + тесты ✅ ЗАВЕРШЕНА (v1.8.0)
 
-- F-Droid манифест (`metadata/com.freenet.vpn.yml`)
-- F-Droid build — сборка без gomobile AAR (pure Java fallback)
-- Android integration tests
-- Бенчмарки производительности bypass
-- OpenWrt init.d скрипт
+- `internal/telegram/bot.go` — long-polling без внешних зависимостей
+- Команды: `/status /on /off /strategy <name> /stats`
+- Android release APK signing через GitHub Secrets (PKCS12 RSA-4096)
+- 50 новых Go тестов (bypass/relay, proxy/socks5, web/handlers, telegram)
+- `TelegramConfig` в config.go, флаги `-telegram-token` / `-telegram-chat-id`
 
-### Фаза 9: Telegram бот 🔄
+### Фаза 10: Test coverage ~70%+ + GitHub community files ✅ ЗАВЕРШЕНА (v1.9.0)
 
-- `internal/telegram/` — бот через Bot API
-- Команды: `/status`, `/enable`, `/disable`, `/strategy auto`
-- Управление удалённым сервером из телефона
-- Push-уведомления о смене статуса
+- 102 новых теста в 8 пакетах: покрытие 21.8% → ~70%+
+- GitHub community files: CONTRIBUTING.md, SECURITY.md, PR template, issue templates
+- README.md с полным описанием, секцией Telegram bot
+
+### Фаза 11: Test coverage ~90%+ ✅ ЗАВЕРШЕНА (v1.9.1)
+
+- 10 новых тест-файлов (fake_linux, quic, hostlist, dns resolver, ECH, nfqueue, handleSOCKS, web lifecycle, telegram Run)
+- Итоговое покрытие: bypass 73.2%, config 88.2%, dns 79.5%, logs 100%, sysproxy 100%, telegram 88.8%, web 89.9%, windivert 100%
+- Предел без root/TUN достигнут: `go test ./... && go vet ./...` — PASS, CLEAN
+
+### Фаза 12: Smoke testing + Platform verification ✅ ЗАВЕРШЕНА (v1.9.1)
+
+- Бинарник 7.1 МБ (ARM64): Web UI 200, `/api/status` JSON, SOCKS5 `0x0500` — всё работает
+- Кросс-компиляция: linux/amd64, arm64, mips, mipsle, windows/amd64 — все OK
+- CI run #53: `completed / success` (freenet-v1.8.1), 13 release assets
+
+### Фаза 13: Исправление Android Go engine + верификация ✅ ЗАВЕРШЕНА (v1.8.1)
+
+- **Критический баг**: Go engine никогда не запускался из-за двух reflection-ошибок
+  - `"mobile.Mobile$SocketProtector"` → `"mobile.SocketProtector"` (правильное имя)
+  - `Long::class.java` (boxed) → `java.lang.Long.TYPE` (primitive, генерирует gomobile)
+- Полная верификация кода: все тесты PASS, vet CLEAN, gofmt CLEAN
+- Релиз freenet-v1.8.1: все 13 артефактов, CI полностью зелёный
 
 ---
 

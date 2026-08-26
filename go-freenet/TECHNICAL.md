@@ -654,15 +654,16 @@ Go код читает raw IPv4 пакеты из TUN fd:
 
 ### gomobile binding
 
-Функции Go, экспортируемые в Java/Kotlin:
+Функции Go, экспортируемые в Java/Kotlin (пакет `com.freenet.bypass` — из `-javapkg`):
 
 ```kotlin
-val engine = Mobile.newFreenetEngine()
+// Фабричный метод — класс Mobile соответствует Go-пакету "mobile"
+val engine = com.freenet.bypass.Mobile.newFreenetEngine()
 engine.start(1080)                    // запуск SOCKS5 прокси
 engine.setStrategy("auto")           // стратегия bypass
 engine.setBypassEnabled(true)        // вкл/выкл bypass
 engine.isRunning()                   // статус
-engine.getVersion()                  // "1.6.0"
+engine.getVersion()                  // "1.8.2"
 engine.getStats()                    // JSON статистика
 engine.getRecentLogs(50)             // последние 50 строк лога
 engine.startVPN(tunFd, 1080, prot)   // блокирующий вызов: запуск TUN loop
@@ -671,11 +672,19 @@ engine.stop()
 
 ### VpnService socket protection
 
-Чтобы трафик прокси не попал снова в TUN (routing loop):
+Чтобы трафик прокси не попал снова в TUN (routing loop).
+`FreenetVpnService.kt` создаёт `SocketProtector` через reflection (не прямой импорт,
+так как AAR может отсутствовать при сборке без gomobile):
 
 ```kotlin
-class GoSocketProtector(private val svc: VpnService) : Mobile.SocketProtector {
-    override fun protect(fd: Long): Boolean = svc.protect(fd.toInt())
+// com.freenet.bypass.SocketProtector — интерфейс из gomobile AAR
+val protectorCls = Class.forName("com.freenet.bypass.SocketProtector")
+val protector = java.lang.reflect.Proxy.newProxyInstance(
+    protectorCls.classLoader,
+    arrayOf(protectorCls)
+) { _, _, args ->
+    val fd = (args[0] as Long).toInt()
+    protect(fd)  // VpnService.protect() — исключает сокет из VPN routing
 }
 ```
 
@@ -740,6 +749,42 @@ when (config.mode) {
 - `FreenetVpnService` рассылает `ACTION_START` / `ACTION_STOP`
 - `FreeNetWidget.onReceive()` вызывает `update(ctx)` → `updateWidget()`
 - `RemoteViews.setInt(id, "setBackgroundColor", color)` меняет цвет
+
+### gomobile reflection — важные правила (v1.8.1)
+
+gomobile генерирует Java-классы по особым правилам. При использовании рефлексии
+в Kotlin необходимо учитывать:
+
+**1. Имена классов**
+
+gomobile экспортирует Go-интерфейсы как **top-level Java классы**, не как вложенные.
+```kotlin
+// ❌ НЕВЕРНО — вложенный класс не существует:
+Class.forName("mobile.Mobile\$SocketProtector")
+
+// ✅ ВЕРНО — top-level Java класс:
+Class.forName("mobile.SocketProtector")
+```
+
+**2. Примитивные типы vs boxed**
+
+gomobile генерирует методы с Java-примитивами (`long`, `int`), не с boxed-типами
+(`java.lang.Long`, `java.lang.Integer`). `getMethod()` строго различает их.
+```kotlin
+// ❌ НЕВЕРНО — boxed тип: java.lang.Long
+.getMethod("startVPN", Long::class.java, Int::class.java, ...)
+// → NoSuchMethodException при runtime
+
+// ✅ ВЕРНО — primitive тип: long
+.getMethod("startVPN", java.lang.Long.TYPE, java.lang.Integer.TYPE, ...)
+```
+
+**Следствие:** Оба бага вызывали тихий `ClassNotFoundException` / `NoSuchMethodException`,
+которые перехватывались catch-блоком → `tryStartGoVPN()` возвращал `false` →
+fallback на pure-Kotlin `PacketForwarder` (пытался подключиться к `127.0.0.1:1080`,
+где SOCKS5 прокси не был запущен) → VPN «подключался», но весь трафик падал.
+
+Исправлено в **v1.8.1** (`FreenetVpnService.kt`).
 
 ---
 
