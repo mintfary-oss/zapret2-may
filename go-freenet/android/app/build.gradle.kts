@@ -26,10 +26,10 @@ val storePass:   String? = System.getenv("STORE_PASSWORD")
 val keyAlias:    String? = System.getenv("KEY_ALIAS")
 val keyPass:     String? = System.getenv("KEY_PASSWORD")
 
-val hasSigningConfig = keystoreB64 != null &&
-        storePass   != null &&
-        keyAlias    != null &&
-        keyPass     != null
+val hasSigningConfig = !keystoreB64.isNullOrBlank() &&
+        !storePass.isNullOrBlank() &&
+        !keyAlias.isNullOrBlank() &&
+        !keyPass.isNullOrBlank()
 
 android {
     namespace  = "com.freenet.vpn"
@@ -49,7 +49,8 @@ android {
         // Write the decoded keystore to a temp file so Gradle can reference it.
         val keystoreFile = layout.buildDirectory.file("release.jks").get().asFile
         keystoreFile.parentFile.mkdirs()
-        keystoreFile.writeBytes(Base64.getDecoder().decode(keystoreB64!!))
+        // getMimeDecoder() tolerates newlines produced by `base64` on Linux/macOS.
+        keystoreFile.writeBytes(Base64.getMimeDecoder().decode(keystoreB64!!))
 
         signingConfigs {
             create("release") {
