@@ -499,3 +499,40 @@ CI пытался запустить `gradle wrapper --gradle-version=8.11.1` ч
 Также `!= null` → `isNullOrBlank()` для защиты от пустых строк в секретах.
 
 **Результат:** Оба фикса закоммичены, тег `freenet-v1.8.0` пересоздан.
+
+---
+
+### 22. Исправление CI: повреждённый keystore в GitHub Secrets
+
+**Пользователь:** "Ещё все установки проверь весь код — всё не работает"
+
+**Neo:** Получил реальные логи CI через GitHub API. Точная ошибка:
+```
+Task :app:packageRelease FAILED
+KeytoolException: Failed to read key from store "signing.jks":
+Get Key failed: Given final block not properly padded.
+```
+
+`assembleDebug` — ПРОХОДИЛ успешно. Падал только `assembleRelease`.
+
+**Причина:** В предыдущей сессии keystore был сгенерирован как PKCS12, но в GitHub Secrets
+были записаны разные значения для `STORE_PASSWORD` и `KEY_PASSWORD`.
+В PKCS12 формате эти пароли **обязаны совпадать** — иначе `keytool` не может
+прочитать приватный ключ.
+
+**Исправление:**
+1. Сгенерирован новый keystore RSA-4096, PKCS12, действителен до 2054
+2. Все 4 GitHub Secrets перезаписаны через API (PyNaCl шифрование):
+   - `KEYSTORE_BASE64` — новый keystore, base64
+   - `STORE_PASSWORD` — `FreeNet_45712d57d9f15bcc`
+   - `KEY_ALIAS` — `freenet`
+   - `KEY_PASSWORD` — `FreeNet_45712d57d9f15bcc` (= STORE_PASSWORD, PKCS12)
+3. Тег `freenet-v1.8.0` пересоздан
+
+**Результат: CI #32976713105 — ВСЕ JOBS ЗЕЛЁНЫЕ ✅**
+- Lint ✅ | Android APK ✅ | Build (все платформы) ✅ | Create GitHub Release ✅
+
+Релиз опубликован: https://github.com/mintfary-oss/zapret2-may/releases/tag/freenet-v1.8.0
+
+SHA-256 нового release-ключа (для Google Play Console):
+`A4:41:EA:E5:63:D0:0D:28:F3:28:FE:6C:3C:F5:7D:37:FE:85:56:C2:A2:13:AF:D9:11:32:66:89:1F:8A:61:30`
