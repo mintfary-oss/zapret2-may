@@ -1,14 +1,18 @@
 name: Build & Release FreeNet
 
-# push branches (paths-filtered) → build + test
-# push v* tag                    → build + create GitHub Release
-# pull_request (paths-filtered)  → build + test
-# workflow_dispatch               → manual trigger from Actions UI
+# branch/tag push  → build + test  (+ GitHub Release on freenet-v* tags)
+# pull_request      → build + test  (only when go-freenet/** changes)
+# workflow_dispatch → manual trigger from Actions UI
+#
+# NOTE: paths filter at trigger level is not applied to tag pushes in GitHub
+# Actions when combined with tags in the same push event. To ensure tag pushes
+# (freenet-v*.*.*) always trigger the release job regardless of which files
+# changed, the paths filter is removed from the push trigger and applied
+# via job-level conditions instead (branches check go-freenet/** via first job).
 on:
   push:
     branches: ["master", "main", "neo/**"]
     tags:     ["freenet-v*.*.*"]
-    paths:    ["go-freenet/**"]
   pull_request:
     paths: ["go-freenet/**"]
   workflow_dispatch: {}
