@@ -17,6 +17,7 @@
 | 9 | Telegram бот + Release signing + тесты | v1.8.0 | ✅ Завершена |
 | 10 | Test coverage ~70%+ + GitHub files | v1.9.0 | ✅ Завершена |
 | 11 | Test coverage ~90%+ (Phase 11) | v1.9.1 | ✅ Завершена |
+| 12 | Smoke testing + Platform verification | v1.9.1 | ✅ Завершена |
 
 ---
 

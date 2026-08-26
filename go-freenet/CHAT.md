@@ -426,3 +426,53 @@ https://github.com/settings/tokens
 - Описание обновлено (Telegram бот)
 
 `go build ./... && go vet ./... && go test ./...` — все тесты PASS.
+
+---
+
+### 20. Phase 12 — Smoke testing + Platform verification (v1.9.1)
+
+**Пользователь:** "Проверь и протестируй приложение полностью — Linux, Windows, Android, web-интерфейс"
+
+**Neo:** Провёл полное дымовое тестирование на ARM64 Linux сервере.
+
+**12.1 Linux smoke test ✅**
+- Сборка: `go build -ldflags="-s -w" ./cmd/freenet` → 7.1 МБ бинарник
+- Запуск с `config.yaml` (стратегия split, SOCKS5 :19180, web :19080)
+- Веб-интерфейс: `HTTP 200`
+- `/api/status` → `{"enabled":true,"strategy":"split","listen_addr":"127.0.0.1:19180","hostlist_size":0,...}`
+- `/api/stats` → `{"active":0,"total":0,"bytes_in":0,"bytes_out":0}`
+- SOCKS5 handshake → `0x05 0x00` (SUCCESS — no auth)
+
+**12.2 Кросс-компиляция всех платформ ✅**
+
+| Платформа | Размер | Статус |
+|-----------|--------|--------|
+| `windows/amd64` | 8.0 МБ | ✅ |
+| `linux/amd64` | 7.6 МБ | ✅ |
+| `linux/arm64` | 7.0 МБ | ✅ |
+| `linux/mips` (softfloat) | 8.2 МБ | ✅ |
+| `linux/mipsle` (softfloat) | 8.2 МБ | ✅ |
+
+**12.3 Go test suite ✅**
+```
+ok  internal/bypass       73.2%
+ok  internal/config       88.2%
+ok  internal/dns          79.5%
+ok  internal/logs        100.0%
+ok  internal/proxy        51.2%
+ok  internal/sysproxy    100.0%
+ok  internal/telegram     86.5%
+ok  internal/web          89.9%
+ok  internal/windivert   100.0%
+ok  mobile                33.1%
+total:                    59.8%
+```
+`go test ./... && go vet ./...` — PASS, CLEAN.
+
+**12.4 Что не удалось протестировать (нет KVM/root)**
+- Windows exe — нет Wine для ARM64
+- Android — нет KVM (эмулятор не запускается без виртуализации)
+- Docker — не установлен в данном окружении
+- transparent proxy / nfqueue — требует root + iptables
+
+**Вывод:** Все тестируемые компоненты работают корректно. Ограничения — только платформенные (WinDivert, TUN, nfqueue) и несовместимые с данным ARM64 окружением.

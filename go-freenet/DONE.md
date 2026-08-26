@@ -296,6 +296,27 @@ freenet.exe -install
 
 ---
 
+## Phase 12 — Smoke testing + Platform verification (v1.9.1) ✅
+
+Полное дымовое тестирование на ARM64 Linux сервере (August 2026):
+
+| Тест | Результат |
+|------|-----------|
+| `go build` Linux (7.1 МБ) | ✅ |
+| Запуск + `HTTP 200` веб-UI | ✅ |
+| `/api/status` JSON | ✅ |
+| `/api/stats` JSON | ✅ |
+| SOCKS5 handshake `0x0500` | ✅ |
+| Cross-compile windows/amd64 | ✅ 8.0 МБ |
+| Cross-compile linux/amd64 | ✅ 7.6 МБ |
+| Cross-compile linux/arm64 | ✅ 7.0 МБ |
+| Cross-compile linux/mips | ✅ 8.2 МБ |
+| Cross-compile linux/mipsle | ✅ 8.2 МБ |
+| `go test ./...` | ✅ PASS |
+| `go vet ./...` | ✅ CLEAN |
+
+---
+
 ## Phase 11 — Test coverage ~90%+ (v1.9.1) ✅
 
 Цель: довести покрытие с 43.8% до максимально возможного без root/TUN-устройств.
