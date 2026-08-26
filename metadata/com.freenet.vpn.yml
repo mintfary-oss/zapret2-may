@@ -1,0 +1,54 @@
+Categories:
+  - Security
+  - Internet
+License: MIT
+AuthorName: mintfary-oss
+SourceCode: https://github.com/mintfary-oss/zapret2-may
+IssueTracker: https://github.com/mintfary-oss/zapret2-may/issues
+
+AutoName: FreeNet
+Summary: DPI bypass VPN — обход блокировок без root
+Description: |-
+  FreeNet — кросс-платформенный инструмент обхода DPI (глубокая инспекция пакетов)
+  для Российских провайдеров (РКН/ТСПУ). Работает без root через VpnService API.
+
+  Стратегии обхода:
+  * TCP split — фрагментация TLS ClientHello на позиции SNI
+  * TLS record splitting — разбивка на два TLS record
+  * Fake packets — пакеты-приманки с TTL=4
+  * Combined — комбинированная атака
+  * Auto — авто-выбор лучшей стратегии под провайдера
+
+  Дополнительные возможности:
+  * DNS-over-HTTPS (Cloudflare / Google / Quad9) — защита от подмены DNS
+  * ECH (Encrypted Client Hello) — passthrough зашифрованных соединений
+  * Per-app split tunnel — выбор приложений, которые идут через VPN
+  * UDP relay — Discord, Steam, видеозвонки
+  * Виджет 2×1 на рабочем столе
+  * Автозапуск при загрузке устройства
+
+  Сборка без gomobile AAR автоматически использует чистый Kotlin fallback
+  (PacketForwarder), который обеспечивает базовое TCP-проксирование.
+
+RepoType: git
+Repo: https://github.com/mintfary-oss/zapret2-may
+
+Builds:
+  - versionName: 1.6.0
+    versionCode: 160
+    commit: freenet-v1.6.0
+    subdir: go-freenet/android
+    gradle:
+      - yes
+    # F-Droid builds without the gomobile AAR.
+    # FreenetVpnService detects the missing AAR at runtime and automatically
+    # falls back to the pure-Kotlin PacketForwarder (basic TCP forwarding).
+    # No prebuild script needed — the AAR dependency is declared as optional
+    # in app/build.gradle.kts: if (file("libs/mobile.aar").exists()) { ... }
+
+AutoUpdateMode: Version freenet-v%v
+UpdateCheckMode: Tags ^freenet-v
+UpdateCheckData: go-freenet/android/app/build.gradle.kts|versionCode\s*=\s*(\d+)|.|versionName\s*=\s*"([^"]+)"
+
+CurrentVersion: 1.6.0
+CurrentVersionCode: 160

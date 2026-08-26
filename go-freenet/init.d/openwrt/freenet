@@ -1,0 +1,138 @@
+#!/bin/sh /etc/rc.common
+# FreeNet — DPI bypass daemon for OpenWrt.
+# Uses the procd init system (OpenWrt 21.02+).
+#
+# Installation:
+#   1. Download the correct binary for your router:
+#        mipsle: freenet-linux-mipsle
+#        mips:   freenet-linux-mips
+#        arm:    freenet-linux-armv7
+#        arm64:  freenet-linux-arm64
+#      Install to /usr/bin/freenet and chmod +x.
+#   2. Copy this file to /etc/init.d/freenet.
+#   3. chmod +x /etc/init.d/freenet
+#   4. Copy config.yaml.example to /etc/freenet/config.yaml and edit.
+#   5. /etc/init.d/freenet enable  (autostart on boot)
+#   6. /etc/init.d/freenet start
+
+USE_PROCD=1
+# Start after the network is up (network = 15).
+START=20
+STOP=89
+
+PROG=/usr/bin/freenet
+CONFIG_DIR=/etc/freenet
+CONFIG_FILE=$CONFIG_DIR/config.yaml
+LOG_FILE=/var/log/freenet.log
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+check_binary() {
+    if [ ! -x "$PROG" ]; then
+        echo "freenet: binary not found at $PROG" >&2
+        echo "Download from https://github.com/mintfary-oss/zapret2-may/releases/latest" >&2
+        return 1
+    fi
+}
+
+ensure_config() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        mkdir -p "$CONFIG_DIR"
+        cat > "$CONFIG_FILE" <<'YAML'
+# FreeNet configuration — OpenWrt
+# See https://github.com/mintfary-oss/zapret2-may for full documentation.
+
+bypass:
+  strategy: auto   # auto | split | tlsrec | combined | fake | none
+  split_pos: 2     # byte offset for TCP/TLS split (0 = at SNI)
+  fake_ttl: 4      # TTL for fake (decoy) packets — Linux only
+
+proxy:
+  socks5_addr: "127.0.0.1:1080"
+  transparent_addr: ""   # leave empty to disable transparent proxy
+
+web:
+  addr: ":8080"          # web UI and API listen address
+  enabled: true
+
+dns:
+  enabled: true
+  addr: "127.0.0.1:5300" # local DoH-resolver (UDP)
+  upstream:
+    - "https://1.1.1.1/dns-query"
+    - "https://8.8.8.8/dns-query"
+
+hostlist:
+  enabled: false
+  auto_update: false
+  url: "https://antifilter.download/list/domains.lst"
+  path: "/etc/freenet/domains.lst"
+YAML
+        echo "freenet: created default config at $CONFIG_FILE — edit before use"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# procd service callbacks
+# ---------------------------------------------------------------------------
+
+start_service() {
+    check_binary || return 1
+    ensure_config
+
+    procd_open_instance
+    procd_set_param command "$PROG" \
+        -config "$CONFIG_FILE" \
+        -web "$(uci_get_option web_addr ":8080")"
+
+    # Restart the daemon automatically if it exits unexpectedly.
+    procd_set_param respawn \
+        "${respawn_threshold:-3600}" \
+        "${respawn_timeout:-5}" \
+        "${respawn_retry:-5}"
+
+    # Redirect stdout/stderr to log file.
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+
+    # PID file for status/reload.
+    procd_set_param pidfile /var/run/freenet.pid
+
+    procd_close_instance
+}
+
+stop_service() {
+    # procd handles SIGTERM; nothing extra needed.
+    :
+}
+
+reload_service() {
+    # FreeNet supports config hot-reload via SIGHUP.
+    local pid
+    pid=$(cat /var/run/freenet.pid 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill -HUP "$pid"
+        echo "freenet: sent SIGHUP (config reload) to pid $pid"
+    else
+        start
+    fi
+}
+
+service_triggers() {
+    # Re-start when the network interface comes up after reconnect.
+    procd_add_reload_trigger "network"
+}
+
+# ---------------------------------------------------------------------------
+# Helper: read UCI option freenet.<section>.<option> with a fallback default.
+# Usage: uci_get_option <option_name> <default>
+# ---------------------------------------------------------------------------
+uci_get_option() {
+    local option="$1"
+    local default="$2"
+    local val
+    val=$(uci get "freenet.main.$option" 2>/dev/null)
+    echo "${val:-$default}"
+}

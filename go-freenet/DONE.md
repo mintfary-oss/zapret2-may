@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.6.0 — Phase 1–7 завершены
+## Текущая версия: v1.7.0 — Phase 1–8 завершены
 
 ---
 
@@ -75,6 +75,10 @@ go-freenet/
 │   │       ├── PacketForwarder.kt    # Kotlin fallback tun2socks
 │   │       ├── VpnViewModel.kt       # MVVM + splitTunnel StateFlow
 │   │       └── BootReceiver.kt       # автозапуск при загрузке
+│   ├── app/src/androidTest/java/com/freenet/vpn/
+│   │   ├── SplitTunnelConfigTest.kt  # 10 instrumented тестов SharedPreferences (v1.7.0)
+│   │   ├── VpnServiceTest.kt         # 7 instrumented тестов класса/интентов (v1.7.0)
+│   │   └── PacketForwarderTest.kt    # 10 instrumented тестов checksum+структуры (v1.7.0)
 │   ├── gradle/
 │   │   ├── libs.versions.toml        # version catalog
 │   │   └── wrapper/gradle-wrapper.properties
@@ -83,6 +87,8 @@ go-freenet/
 │   └── settings.gradle.kts
 ├── init.d/systemd/
 │   └── freenet.service               # systemd unit
+├── init.d/openwrt/
+│   └── freenet                       # procd init.d скрипт для OpenWrt (v1.7.0)
 ├── scripts/
 │   ├── install.sh                    # установщик Linux (systemd)
 │   ├── install-windows.ps1           # PowerShell one-liner (скачивает bundle с WinDivert)
@@ -91,7 +97,7 @@ go-freenet/
 │   ├── build-android.sh              # сборка gomobile AAR
 │   └── build-release-apk.sh          # полный pipeline: AAR → APK
 ├── .github/workflows/
-│   └── freenet.yml                   # CI/CD: lint + build + android + bundle + release
+│   └── freenet.yml                   # CI/CD: lint + build (incl. MIPS) + android + release
 ├── Dockerfile                        # multi-stage, финальный образ ~15 MB
 ├── docker-compose.yml                # одна команда запуска
 ├── docker-entrypoint.sh              # entrypoint с настройкой iptables
@@ -147,7 +153,7 @@ go-freenet/
 
 ---
 
-## Android (v1.6.0)
+## Android (v1.7.0)
 
 | Компонент | Что делает |
 |-----------|-----------|
@@ -172,6 +178,8 @@ go-freenet/
 | 🐧 Linux x86-64 | `freenet-linux-amd64` | бинарник или installer |
 | 🐧 Linux ARM64 | `freenet-linux-arm64` | бинарник или installer |
 | 🐧 Linux ARMv7 | `freenet-linux-armv7` | Raspberry Pi / роутеры |
+| 📡 OpenWrt MIPS | `freenet-linux-mips` | TP-Link WR841, Netgear WNR |
+| 📡 OpenWrt MIPSle | `freenet-linux-mipsle` | MediaTek MT7620/MT7621 |
 | 🐧 Linux bundle | `freenet-linux-amd64-installer.tar.gz` | tar + `sudo bash install.sh` |
 | 🐧 Linux (авто) | `install.sh` | `curl … | sudo bash` |
 | 🐳 Docker | — | `docker compose up -d` |

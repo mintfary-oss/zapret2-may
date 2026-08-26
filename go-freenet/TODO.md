@@ -13,62 +13,37 @@
 | 5 | ECH + unit tests (35 тестов) | v1.4.0 | ✅ Завершена |
 | 6 | Windows WinDivert (kernel bypass) | v1.5.2 | ✅ Завершена |
 | 7 | Android: UDP relay, split tunnel, виджет | v1.6.0 | ✅ Завершена |
-| 8 | F-Droid + качество | — | 🔄 Следующая |
-| 9 | Telegram бот | — | 📋 В плане |
+| 8 | F-Droid + OpenWrt + качество | v1.7.0 | ✅ Завершена |
+| 9 | Telegram бот | — | 🔄 Следующая |
 
 ---
 
-## Phase 8 — F-Droid + качество
+## Phase 8 — F-Droid + OpenWrt + качество ✅ ЗАВЕРШЕНА (v1.7.0)
 
-### 8.1 F-Droid манифест
+### 8.1 F-Droid манифест ✅
 
-```yaml
-# metadata/com.freenet.vpn.yml
-Categories:
-  - Security
-License: MIT
-SourceCode: https://github.com/mintfary-oss/zapret2-may
-IssueTracker: https://github.com/mintfary-oss/zapret2-may/issues
-Builds:
-  - versionName: 1.6.0
-    versionCode: 160
-    commit: freenet-v1.6.0
-    subdir: go-freenet/android
-    gradle:
-      - yes
-    prebuild:
-      - bash ../scripts/build-android.sh
-```
+`metadata/com.freenet.vpn.yml` в корне репо. Сборка без gomobile AAR —
+`FreenetVpnService` автоматически переключается на `PacketForwarder.kt`.
 
-### 8.2 Android integration tests
+### 8.2 Android integration tests ✅
 
-```kotlin
-// android/app/src/androidTest/VpnServiceTest.kt
-@RunWith(AndroidJUnit4::class)
-class VpnServiceTest {
-    @Test fun testVpnServiceStartStop() {
-        val ctx = ApplicationProvider.getApplicationContext<Context>()
-        // Проверяем что сервис запускается и останавливается без краша
-    }
-}
-```
+- `androidTest/SplitTunnelConfigTest.kt` — 10 тестов SharedPreferences
+- `androidTest/VpnServiceTest.kt` — 7 тестов класса/интентов
+- `androidTest/PacketForwarderTest.kt` — 10 тестов IP/TCP checksum
 
-### 8.3 OpenWrt init.d скрипт
+### 8.3 OpenWrt procd init.d скрипт ✅
 
-```sh
-#!/bin/sh /etc/rc.common
-START=99
-STOP=10
-USE_PROCD=1
-PROG=/usr/bin/freenet
+`go-freenet/init.d/openwrt/freenet` — procd-скрипт с respawn,
+auto-config, reload через SIGHUP.
 
-start_service() {
-    procd_open_instance
-    procd_set_param command $PROG -web :8080 -config /etc/freenet/config.yaml
-    procd_set_param respawn
-    procd_close_instance
-}
-```
+### 8.4 Go bypass benchmarks ✅
+
+`internal/bypass/relay_bench_test.go` — бенчмарки throughput через
+`net.Pipe()`: plain, split, disorder, tlsrec + парсинг ClientHello.
+
+### 8.5 CI: OpenWrt MIPS сборки ✅
+
+Добавлены в матрицу: `linux/mips` (softfloat) и `linux/mipsle` (softfloat).
 
 ---
 

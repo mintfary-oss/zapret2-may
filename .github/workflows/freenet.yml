@@ -45,10 +45,14 @@ jobs:
     strategy:
       matrix:
         include:
-          - {goos: linux,   goarch: amd64, artifact: freenet-linux-amd64}
-          - {goos: linux,   goarch: arm64, artifact: freenet-linux-arm64}
-          - {goos: linux,   goarch: arm,   goarm: "7", artifact: freenet-linux-armv7}
-          - {goos: windows, goarch: amd64, artifact: freenet-windows-amd64.exe}
+          - {goos: linux,   goarch: amd64,  artifact: freenet-linux-amd64}
+          - {goos: linux,   goarch: arm64,  artifact: freenet-linux-arm64}
+          - {goos: linux,   goarch: arm,    goarm: "7", artifact: freenet-linux-armv7}
+          # OpenWrt routers — MIPS big-endian (TP-Link WR841, Netgear WNR, etc.)
+          - {goos: linux,   goarch: mips,   gomips: softfloat, artifact: freenet-linux-mips}
+          # OpenWrt routers — MIPS little-endian (MediaTek MT7620/MT7621, Qualcomm Atheros)
+          - {goos: linux,   goarch: mipsle, gomips: softfloat, artifact: freenet-linux-mipsle}
+          - {goos: windows, goarch: amd64,  artifact: freenet-windows-amd64.exe}
 
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +65,7 @@ jobs:
           GOOS:        ${{ matrix.goos }}
           GOARCH:      ${{ matrix.goarch }}
           GOARM:       ${{ matrix.goarm }}
+          GOMIPS:      ${{ matrix.gomips }}
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
@@ -307,6 +312,8 @@ jobs:
             | 🐧 Linux amd64 | `freenet-linux-amd64` | Bare binary |
             | 🐧 Linux arm64 | `freenet-linux-arm64` | Bare binary |
             | 🐧 Linux ARMv7 | `freenet-linux-armv7` | Bare binary (Raspberry Pi) |
+            | 📡 OpenWrt MIPS | `freenet-linux-mips` | TP-Link WR841, Netgear WNR |
+            | 📡 OpenWrt MIPSle | `freenet-linux-mipsle` | MediaTek MT7620/MT7621 |
             | 🐳 Android AAR | `mobile.aar` | Для разработчиков |
 
           generate_release_notes: true
