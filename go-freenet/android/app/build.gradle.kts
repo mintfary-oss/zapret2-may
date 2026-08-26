@@ -1,5 +1,3 @@
-import java.util.Base64
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -9,27 +7,20 @@ plugins {
 // ---------------------------------------------------------------------------
 // Release signing
 // ---------------------------------------------------------------------------
-// Secrets are injected via environment variables (GitHub Actions → Secrets).
-// Local developers can set these in ~/.gradle/gradle.properties or export
-// them in the shell before running ./gradlew assembleRelease.
+// The CI script decodes KEYSTORE_BASE64 and writes android/app/signing.jks
+// before invoking Gradle.  We only need to reference the file here — no
+// Base64 or IO at configuration time, which avoids Gradle config-cache and
+// cross-receiver issues.
 //
-//   KEYSTORE_BASE64   — Base64-encoded JKS keystore file
-//   STORE_PASSWORD    — keystore password
-//   KEY_ALIAS         — key alias inside the keystore
-//   KEY_PASSWORD      — private-key password
-//
-// If the variables are absent the release build is unsigned (F-Droid re-signs
-// with its own key, so an unsigned APK is fine for F-Droid submission).
+// When the file is absent (unsigned build, F-Droid), the release APK is
+// produced without a signingConfig — F-Droid re-signs it with its own key.
 // ---------------------------------------------------------------------------
-val keystoreB64: String? = System.getenv("KEYSTORE_BASE64")
-val storePass:   String? = System.getenv("STORE_PASSWORD")
-val keyAlias:    String? = System.getenv("KEY_ALIAS")
-val keyPass:     String? = System.getenv("KEY_PASSWORD")
-
-val hasSigningConfig = !keystoreB64.isNullOrBlank() &&
-        !storePass.isNullOrBlank() &&
-        !keyAlias.isNullOrBlank() &&
-        !keyPass.isNullOrBlank()
+val signingJks    = file("signing.jks")
+val storePass     = System.getenv("STORE_PASSWORD")     ?: ""
+val keyAliasVal   = System.getenv("KEY_ALIAS")          ?: ""
+val keyPassVal    = System.getenv("KEY_PASSWORD")       ?: ""
+val hasReleaseKey = signingJks.exists() &&
+        storePass.isNotBlank() && keyAliasVal.isNotBlank() && keyPassVal.isNotBlank()
 
 android {
     namespace  = "com.freenet.vpn"
@@ -45,19 +36,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    if (hasSigningConfig) {
-        // Write the decoded keystore to a temp file so Gradle can reference it.
-        val keystoreFile = layout.buildDirectory.file("release.jks").get().asFile
-        keystoreFile.parentFile.mkdirs()
-        // getMimeDecoder() tolerates newlines produced by `base64` on Linux/macOS.
-        keystoreFile.writeBytes(Base64.getMimeDecoder().decode(keystoreB64!!))
-
-        signingConfigs {
+    signingConfigs {
+        if (hasReleaseKey) {
             create("release") {
-                storeFile     = keystoreFile
+                storeFile     = signingJks
                 storePassword = storePass
-                this.keyAlias = keyAlias
-                keyPassword   = keyPass
+                keyAlias      = keyAliasVal
+                keyPassword   = keyPassVal
             }
         }
     }
@@ -69,7 +54,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            if (hasSigningConfig) {
+            if (hasReleaseKey) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }

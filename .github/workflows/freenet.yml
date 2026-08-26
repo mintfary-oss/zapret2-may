@@ -129,12 +129,21 @@ jobs:
         run: |
           mkdir -p android/app/libs
           cp dist/mobile.aar android/app/libs/mobile.aar
+
+          # Decode keystore before Gradle runs (avoids Base64/IO at config time).
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/app/signing.jks
+            echo "Release keystore decoded ($(wc -c < android/app/signing.jks) bytes)"
+          else
+            echo "No KEYSTORE_BASE64 — building unsigned release APK"
+          fi
+
           cd android
           chmod +x ./gradlew
           # Build debug APK (always).
           ./gradlew assembleDebug --no-daemon
           cp app/build/outputs/apk/debug/app-debug.apk ../dist/freenet-android-debug.apk
-          # Build release APK (signed when secrets present, unsigned otherwise).
+          # Build release APK (signed when signing.jks present, unsigned otherwise).
           ./gradlew assembleRelease --no-daemon
           cp app/build/outputs/apk/release/app-release*.apk ../dist/freenet-android.apk
 

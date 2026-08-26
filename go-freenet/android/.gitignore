@@ -12,3 +12,6 @@
 # Not tracked in git; each developer builds it from source.
 app/libs/mobile.aar
 app/libs/mobile-sources.jar
+
+# Release keystore — decoded by CI from KEYSTORE_BASE64 secret, never committed.
+app/signing.jks
