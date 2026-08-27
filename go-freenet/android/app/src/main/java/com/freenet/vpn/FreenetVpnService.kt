@@ -323,7 +323,12 @@ class FreenetVpnService : VpnService() {
      */
     private fun initGoEngine() {
         try {
-            val newEngine = Class.forName("com.freenet.bypass.Mobile")
+            // gomobile bind -javapkg com.freenet.bypass ./mobile generates classes in
+            // com.freenet.bypass.mobile (Go package name appended to Java package prefix):
+            //   com.freenet.bypass.mobile.Mobile        — package-level factory
+            //   com.freenet.bypass.mobile.FreenetEngine — engine struct
+            //   com.freenet.bypass.mobile.SocketProtector — interface
+            val newEngine = Class.forName("com.freenet.bypass.mobile.Mobile")
                 .getMethod("newFreenetEngine")
             goEngine = newEngine.invoke(null)
 
@@ -448,7 +453,7 @@ class FreenetVpnService : VpnService() {
      */
     private fun tryStartGoVPNLegacy(tunFd: Long, eng: Any): Boolean {
         return try {
-            val protectorCls = Class.forName("com.freenet.bypass.SocketProtector")
+            val protectorCls = Class.forName("com.freenet.bypass.mobile.SocketProtector")
             val protector = java.lang.reflect.Proxy.newProxyInstance(
                 protectorCls.classLoader,
                 arrayOf(protectorCls)

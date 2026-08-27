@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.8.4 RELEASED ✅ — Critical Android fixes: StartVPNSimple, DNS fallback, diagnostics
+## Текущая версия: v1.8.5 RELEASED ✅ — THE ROOT CAUSE: wrong class name for Go engine (com.freenet.bypass.mobile.*)
 
 ---
 

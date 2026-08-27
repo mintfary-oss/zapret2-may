@@ -763,3 +763,31 @@ Android запрещает смешивать `addDisallowedApplication` и `add
 - `VpnViewModel.kt`: polling `engineStatus`
 - `MainActivity.kt`: `EngineStatusChip` Compose компонент
 
+
+---
+
+### Phase 14 — Найдена РЕАЛЬНАЯ корневая причина v1.8.5
+
+**Пользователь:** Установил v1.8.4, видит "Kotlin fallback только TCP Dns не работает"
+
+**Neo:** Скачал APK с GitHub, распаковал, просканировал dex-файл через Python.
+
+**Найдено:** Go engine классы IN APK, но по ДРУГОМУ адресу:
+```
+com/freenet/bypass/mobile/Mobile        ← РЕАЛЬНЫЙ адрес
+com/freenet/bypass/mobile/FreenetEngine
+com/freenet/bypass/mobile/SocketProtector
+```
+
+Код искал: `com.freenet.bypass.Mobile` (ClassNotFoundException)
+
+**Почему:** `gomobile bind -javapkg com.freenet.bypass ./mobile` ДОБАВЛЯЕТ имя Go пакета (`mobile`) к Java префиксу.
+Итоговый Java пакет: `com.freenet.bypass.mobile`.
+
+Это была единственная корневая причина "VPN работает но трафик не идёт" во ВСЕХ предыдущих версиях.
+
+**Исправление:** 
+- `Class.forName("com.freenet.bypass.Mobile")` → `Class.forName("com.freenet.bypass.mobile.Mobile")`
+- `Class.forName("com.freenet.bypass.SocketProtector")` → `Class.forName("com.freenet.bypass.mobile.SocketProtector")`
+- proguard-rules.pro: добавлен явный `-keep class com.freenet.bypass.mobile.**`
+
