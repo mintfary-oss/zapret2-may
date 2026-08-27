@@ -46,6 +46,14 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
     /** JSON stats string from the Go engine (refreshed while connected). */
     val stats: StateFlow<String> = _stats
 
+    private val _engineStatus = MutableStateFlow(FreenetVpnService.engineStatus)
+    /**
+     * Short diagnostic line: "Go engine v1.0.0 — активен ✓" or
+     * "Kotlin fallback — только TCP, DNS не работает!"
+     * Always visible so the user can see what mode the VPN is in.
+     */
+    val engineStatus: StateFlow<String> = _engineStatus.asStateFlow()
+
     private val _logs = MutableStateFlow("")
     /** Recent log lines from the Go engine (refreshed while connected). */
     val logs: StateFlow<String> = _logs.asStateFlow()
@@ -120,6 +128,9 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch(Dispatchers.IO) {
             while (true) {
+                // Always refresh engine status (visible even before full connect).
+                _engineStatus.value = FreenetVpnService.engineStatus
+
                 val svc = FreenetVpnService.instance
                 if (svc != null) {
                     val statsJson = svc.getStats()

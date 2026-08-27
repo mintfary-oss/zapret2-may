@@ -279,21 +279,94 @@ func (fw *tunForwarder) handlePacket(pkt []byte) {
 // handleDNSQuery intercepts a UDP DNS query from the TUN and resolves it via
 // DNS-over-HTTPS, then injects the response back as a UDP packet on the TUN.
 // This prevents the ISP from seeing or forging DNS queries.
+//
+// Fallback strategy (to prevent "VPN on but no internet"):
+//  1. Try DoH (encrypted, bypasses ISP DNS poisoning).
+//  2. If DoH fails, try plain UDP DNS to a public resolver via a direct socket
+//     (the VPN service process is excluded from the TUN, so the socket bypasses
+//     the VPN automatically — no routing loop).
+//  3. If both fail, inject a SERVFAIL response so the device knows DNS failed
+//     immediately (rather than waiting for its own timeout and getting stuck).
 func (fw *tunForwarder) handleDNSQuery(srcIP, dstIP [4]byte, srcPort, dstPort uint16, query []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Attempt 1: DoH.
 	resp, err := fw.dohClient.Exchange(ctx, query)
-	if err != nil {
-		log.Printf("tun: DoH query failed: %v", err)
+	if err == nil {
+		// Build a UDP response packet swapping src/dst so it looks like it came
+		// from the DNS server the device originally queried.
+		pkt := buildUDPPacket(dstIP[:], srcIP[:], dstPort, srcPort, resp)
+		if werr := fw.writePkt(pkt); werr != nil {
+			log.Printf("tun: write DoH response: %v", werr)
+		}
 		return
 	}
+	log.Printf("tun: DoH failed (%v) — trying direct UDP DNS fallback", err)
 
-	// Build a UDP response packet: swap src/dst so it looks like it came from
-	// the DNS server the device originally queried.
-	pkt := buildUDPPacket(dstIP[:], srcIP[:], dstPort, srcPort, resp)
-	if err := fw.writePkt(pkt); err != nil {
-		log.Printf("tun: write DNS response: %v", err)
+	// Attempt 2: plain UDP DNS to 8.8.8.8:53 or 1.1.1.1:53 via a direct socket.
+	// Works because the VPN service process bypasses the TUN (addDisallowedApplication).
+	for _, fallback := range []string{"8.8.8.8:53", "1.1.1.1:53", "9.9.9.9:53"} {
+		resp, err = queryDNSUDP(ctx, fallback, query)
+		if err == nil {
+			log.Printf("tun: DNS fallback via %s succeeded", fallback)
+			pkt := buildUDPPacket(dstIP[:], srcIP[:], dstPort, srcPort, resp)
+			if werr := fw.writePkt(pkt); werr != nil {
+				log.Printf("tun: write UDP DNS response: %v", werr)
+			}
+			return
+		}
+		log.Printf("tun: DNS fallback %s failed: %v", fallback, err)
+	}
+
+	// Attempt 3: send SERVFAIL so the device fails immediately instead of
+	// waiting for its own DNS timeout.
+	log.Printf("tun: all DNS resolvers failed — sending SERVFAIL")
+	if servfail := buildSERVFAIL(query); servfail != nil {
+		pkt := buildUDPPacket(dstIP[:], srcIP[:], dstPort, srcPort, servfail)
+		_ = fw.writePkt(pkt)
+	}
+}
+
+// queryDNSUDP sends a raw DNS query over UDP to addr and returns the wire-format
+// response.  Uses the Go standard library — the VPN service process is excluded
+// from the TUN so the socket goes directly to the internet.
+func queryDNSUDP(ctx context.Context, addr string, query []byte) ([]byte, error) {
+	conn, err := net.Dial("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+
+	if _, err := conn.Write(query); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
+// buildSERVFAIL constructs a minimal DNS SERVFAIL response for query.
+// Returns nil if query is too short to extract a transaction ID.
+func buildSERVFAIL(query []byte) []byte {
+	if len(query) < 2 {
+		return nil
+	}
+	// Response: same ID, QR=1 (response), RCODE=2 (SERVFAIL), zero counts.
+	return []byte{
+		query[0], query[1], // ID (copied from query)
+		0x80, 0x02, // QR=1, OPCODE=0, AA=0, TC=0, RD=1, RA=0, RCODE=2 (SERVFAIL)
+		0x00, 0x00, // QDCOUNT = 0 (omit question for simplicity)
+		0x00, 0x00, // ANCOUNT = 0
+		0x00, 0x00, // NSCOUNT = 0
+		0x00, 0x00, // ARCOUNT = 0
 	}
 }
 

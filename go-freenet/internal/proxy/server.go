@@ -159,6 +159,17 @@ func (s *Server) SetEnabled(v bool) {
 	}
 }
 
+// ListenAddr returns the address the SOCKS5 proxy is listening on.
+// Returns an empty string if the server has not started yet.
+func (s *Server) ListenAddr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.socksLn == nil {
+		return ""
+	}
+	return s.socksLn.Addr().String()
+}
+
 // Strategy returns the current bypass strategy name.
 func (s *Server) Strategy() string { return s.cfg.Bypass.Strategy }
 

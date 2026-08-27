@@ -44,7 +44,7 @@ class FreenetVpnService : VpnService() {
         private const val TUN_ADDRESS = "10.89.0.2"
         private const val TUN_PREFIX  = 24
 
-        /** DNS server routed through the bypass engine. */
+        /** DNS server routed through the bypass engine (intercepted via DoH). */
         private const val DNS_SERVER = "1.1.1.1"
 
         /** Android notification channel id. */
@@ -55,6 +55,23 @@ class FreenetVpnService : VpnService() {
 
         /** Shared running state — used by MainActivity/ViewModel to check the UI. */
         val isRunning = AtomicBoolean(false)
+
+        /**
+         * Whether the Go AAR engine is loaded and active.  False means the
+         * pure-Kotlin PacketForwarder fallback is running (TCP only, no DNS).
+         * Exposed so the UI can warn users when the AAR is absent.
+         */
+        @Volatile
+        var goEngineActive = false
+            private set
+
+        /**
+         * Short human-readable engine status line shown in the UI diagnostics
+         * area (e.g. "Go engine v1.0.0 (bypass active)" or "Kotlin fallback").
+         */
+        @Volatile
+        var engineStatus = "initialising…"
+            private set
 
         /**
          * Singleton reference set while the service is alive.
@@ -298,22 +315,31 @@ class FreenetVpnService : VpnService() {
      * Instantiates the Go bypass engine using reflection so that the code
      * compiles and runs even when the gomobile AAR is absent (e.g., during
      * plain Gradle sync or in CI without a pre-built AAR).
+     *
+     * After `gomobile bind -javapkg com.freenet.bypass ./mobile` all generated
+     * types live in the `com.freenet.bypass` package:
+     *   - `com.freenet.bypass.Mobile`        — package-level factory class
+     *   - `com.freenet.bypass.FreenetEngine` — engine struct
      */
     private fun initGoEngine() {
         try {
-            // gomobile bind uses -javapkg com.freenet.bypass, so all generated
-            // Java types live in the com.freenet.bypass package:
-            //   com.freenet.bypass.Mobile       — package-level factory class
-            //   com.freenet.bypass.FreenetEngine — engine struct
-            //   com.freenet.bypass.SocketProtector — SocketProtector interface
-            // Using the old "mobile.*" names always throws ClassNotFoundException.
             val newEngine = Class.forName("com.freenet.bypass.Mobile")
                 .getMethod("newFreenetEngine")
             goEngine = newEngine.invoke(null)
-            Log.i(TAG, "Go engine initialised (com.freenet.bypass.FreenetEngine)")
+
+            // Read the engine version for diagnostic display.
+            val ver = try {
+                goEngine!!.javaClass.getMethod("getVersion")
+                    .invoke(goEngine) as? String ?: "?"
+            } catch (_: Exception) { "?" }
+
+            engineStatus = "Go engine v$ver — загружен ✓"
+            Log.i(TAG, "Go engine initialised (v$ver)")
         } catch (e: ClassNotFoundException) {
-            Log.w(TAG, "Go engine AAR not found — bypass disabled (run scripts/build-android.sh)")
+            engineStatus = "Kotlin fallback (нет AAR) — только TCP"
+            Log.w(TAG, "Go engine AAR not found — Kotlin PacketForwarder will handle traffic")
         } catch (e: Exception) {
+            engineStatus = "Ошибка инициализации Go: $e"
             Log.e(TAG, "Go engine init error: $e")
         }
     }
@@ -342,12 +368,20 @@ class FreenetVpnService : VpnService() {
      * domain resolution fails → "VPN on but no traffic" symptom.
      */
     private fun runVpnLoop(tunFd: Long) {
+        // Optimistically mark the Go engine as active; tryStartGoVPN clears this
+        // if the AAR is absent or immediately fails.
+        if (goEngine != null) {
+            goEngineActive = true
+            engineStatus = engineStatus.replace("загружен ✓", "активен ✓")
+        }
         val aarPresent = tryStartGoVPN(tunFd)
         if (!aarPresent) {
             // Go AAR not compiled in — use pure-Kotlin TCP-only fallback.
             // DNS (UDP port 53) will NOT work in this mode.  This path is only
             // intended for development builds without a prebuilt AAR.
             Log.w(TAG, "Go AAR absent — Kotlin PacketForwarder running (TCP only, no DNS)")
+            engineStatus = "Kotlin fallback — только TCP, DNS не работает!"
+            goEngineActive = false
             PacketForwarder(
                 tunFd     = tunFd,
                 socksAddr = "127.0.0.1:$SOCKS5_PORT",
@@ -360,59 +394,91 @@ class FreenetVpnService : VpnService() {
     /**
      * Starts the Go VPN engine via reflection and **blocks** until it stops.
      *
-     * Returns:
-     *  - **true**  — AAR was present.  Go engine ran and has now ended (either
-     *                because the TUN fd was closed by [stopVpn], or due to a Go
-     *                error).  Caller must NOT start PacketForwarder.
-     *  - **false** — AAR is absent (ClassNotFoundException).  Caller may start
-     *                the Kotlin fallback.
+     * Uses [FreenetEngine.startVPNSimple] which does NOT require a
+     * SocketProtector callback.  This is safe because [buildTunInterface] calls
+     * [android.net.VpnService.Builder.addDisallowedApplication] for FreeNet's
+     * own package, so all bypass-proxy sockets already bypass the TUN without
+     * any per-socket protect() call.
      *
-     * Shutdown path: [stopVpn] closes the TUN fd → Go's ForwardTUN returns an
-     * error → gomobile wraps it as [java.lang.reflect.InvocationTargetException].
-     * We catch that here and return **true** (engine ran; don't fall back).
+     * Returns:
+     *  - **true**  — Go AAR was present and ran.  Caller must NOT start PacketForwarder.
+     *  - **false** — AAR absent or engine could not start.  Caller may try Kotlin fallback.
      */
     private fun tryStartGoVPN(tunFd: Long): Boolean {
         val eng = goEngine ?: return false
         return try {
-            // gomobile bind uses -javapkg com.freenet.bypass.
-            // Use Long.TYPE / Integer.TYPE (primitive types) — NOT Long::class.java
-            // (boxed) — otherwise getMethod throws NoSuchMethodException.
+            // startVPNSimple(long tunFd, int port) — no SocketProtector needed.
+            // Using Long.TYPE / Integer.TYPE (primitive) avoids NoSuchMethodException.
+            eng.javaClass
+                .getMethod("startVPNSimple",
+                    java.lang.Long.TYPE,
+                    java.lang.Integer.TYPE)
+                .invoke(eng, tunFd, SOCKS5_PORT)
+
+            // startVPNSimple returned — TUN fd was closed (normal shutdown).
+            goEngineActive = false
+            true
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            // Go error propagated back.  Most common: TUN fd closed by stopVpn().
+            goEngineActive = false
+            val cause = e.cause
+            if (!isRunning.get()) {
+                Log.d(TAG, "Go VPN ended (normal shutdown): ${cause?.message}")
+            } else {
+                Log.e(TAG, "Go VPN error while running: $cause")
+                engineStatus = "Ошибка движка: ${cause?.message}"
+            }
+            true  // AAR was present — do NOT start PacketForwarder
+        } catch (e: NoSuchMethodException) {
+            // AAR older than v1.8.4 — startVPNSimple not available.
+            // Fall back to startVPN with SocketProtector (legacy path).
+            Log.w(TAG, "startVPNSimple not found, trying legacy startVPN: $e")
+            tryStartGoVPNLegacy(tunFd, eng)
+        } catch (e: Exception) {
+            Log.e(TAG, "tryStartGoVPN failed: $e")
+            engineStatus = "Ошибка запуска Go: $e"
+            false
+        }
+    }
+
+    /**
+     * Legacy fallback for AAR versions < 1.8.4 that only expose [startVPN]
+     * with a SocketProtector parameter.  Uses a [java.lang.reflect.Proxy] to
+     * implement the interface.
+     */
+    private fun tryStartGoVPNLegacy(tunFd: Long, eng: Any): Boolean {
+        return try {
             val protectorCls = Class.forName("com.freenet.bypass.SocketProtector")
             val protector = java.lang.reflect.Proxy.newProxyInstance(
                 protectorCls.classLoader,
                 arrayOf(protectorCls)
             ) { _, _, args ->
-                val fd = (args[0] as Long).toInt()
+                val fd = (args?.getOrNull(0) as? Long)?.toInt() ?: return@newProxyInstance false
                 protect(fd)
             }
-
             eng.javaClass
                 .getMethod("startVPN",
                     java.lang.Long.TYPE,
                     java.lang.Integer.TYPE,
                     protectorCls)
                 .invoke(eng, tunFd, SOCKS5_PORT, protector)
-
-            // startVPN returned nil error (rare — normally shutdown closes TUN first).
+            goEngineActive = false
             true
         } catch (e: ClassNotFoundException) {
-            // AAR classes not found — not compiled in.
-            Log.w(TAG, "Go AAR absent — Kotlin fallback will handle traffic")
+            Log.w(TAG, "Go AAR classes not found — using Kotlin PacketForwarder")
             false
         } catch (e: java.lang.reflect.InvocationTargetException) {
-            // Go's StartVPN returned a non-nil error.  The most common case is
-            // the TUN fd being closed by stopVpn() — that is normal shutdown.
+            goEngineActive = false
             val cause = e.cause
             if (!isRunning.get()) {
-                Log.d(TAG, "Go VPN ended (normal shutdown): ${cause?.message}")
+                Log.d(TAG, "Go VPN (legacy) ended: ${cause?.message}")
             } else {
-                Log.e(TAG, "Go VPN error while running: $cause")
+                Log.e(TAG, "Go VPN (legacy) error: $cause")
             }
-            true  // AAR was present and ran — do NOT start PacketForwarder
+            true
         } catch (e: Exception) {
-            // Reflection setup failure (e.g. NoSuchMethodException).
-            Log.e(TAG, "tryStartGoVPN reflection setup failed: $e")
-            false  // Treat as AAR absent; PacketForwarder is better than nothing
+            Log.e(TAG, "tryStartGoVPNLegacy failed: $e")
+            false
         }
     }
 

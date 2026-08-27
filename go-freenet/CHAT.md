@@ -734,3 +734,32 @@ Android запрещает смешивать `addDisallowedApplication` и `add
 **Исправление:** ViewModel слушает `ACTION_START` и `ACTION_STOP` broadcasts. Polling стартует только при `ACTION_START`.
 
 **Дополнительно:** MTU уменьшен с 1500 до 1400 для совместимости с мобильными сетями.
+
+---
+
+### Phase 13 — Критические исправления Android v1.8.4
+
+**Пользователь:** "VPN подключается, но сайты не загружаются — нажал кнопку, VPN icon появился, но трафик не идёт"
+
+**Neo:** Глубокий аудит кода (38 файлов, все слои). Найдены 3 корневые причины:
+
+1. **SocketProtector через java.lang.reflect.Proxy** — gobind не гарантирует вызов callbacks
+   через обычные Java Proxy объекты. Добавлен `StartVPNSimple(tunFd, port)` в Go engine
+   (без SocketProtector) — это корректно, так как `addDisallowedApplication(packageName)`
+   уже исключает процесс FreeNet из VPN, protect() вызовы избыточны.
+
+2. **Тихое отбрасывание DNS** — при неудаче DoH запрос просто дропался, устройство
+   ждало свой таймаут (~5 сек/запрос) → страницы не открывались. Добавлена цепочка:
+   DoH → UDP fallback (8.8.8.8, 1.1.1.1, 9.9.9.9) → SERVFAIL (немедленный ответ).
+
+3. **Нет диагностики** — пользователь не мог видеть загружен ли Go движок.
+   Добавлен `EngineStatusChip` в UI: зелёный (Go активен), жёлтый (Kotlin fallback), красный (ошибка).
+
+**Изменения v1.8.4:**
+- `mobile/engine.go`: `StartVPNSimple()` + `GetListenAddr()`
+- `internal/proxy/server.go`: `ListenAddr()`
+- `mobile/tun.go`: `handleDNSQuery` → DoH + UDP fallback + SERVFAIL
+- `FreenetVpnService.kt`: использует `startVPNSimple`, legacy fallback на `startVPN`
+- `VpnViewModel.kt`: polling `engineStatus`
+- `MainActivity.kt`: `EngineStatusChip` Compose компонент
+

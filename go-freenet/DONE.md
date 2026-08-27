@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.8.2 RELEASED ✅ — Go engine на Android наконец работает правильно
+## Текущая версия: v1.8.4 RELEASED ✅ — Critical Android fixes: StartVPNSimple, DNS fallback, diagnostics
 
 ---
 

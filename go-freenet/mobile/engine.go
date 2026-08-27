@@ -185,6 +185,32 @@ func (e *FreenetEngine) StartVPN(tunFd int64, port int, protector SocketProtecto
 	return ForwardTUN(tunFd, socksAddr, protector)
 }
 
+// StartVPNSimple is identical to [StartVPN] but does not require a
+// SocketProtector callback.  Use this when the VPN service process is already
+// excluded from the TUN routing table via
+// VpnService.Builder.addDisallowedApplication — all bypass-proxy sockets then
+// automatically bypass the VPN TUN, so per-socket protect() calls are
+// unnecessary.
+//
+// This is the recommended entry-point for the Android Kotlin integration
+// because it avoids the java.lang.reflect.Proxy / gobind callback machinery
+// that can silently fail on some devices/Android versions.
+func (e *FreenetEngine) StartVPNSimple(tunFd int64, port int) error {
+	return e.StartVPN(tunFd, port, nil)
+}
+
+// GetListenAddr returns the address the SOCKS5 proxy is listening on
+// (e.g. "127.0.0.1:1080").  Returns an empty string if the engine has not
+// been started yet.
+func (e *FreenetEngine) GetListenAddr() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.server == nil {
+		return ""
+	}
+	return e.server.ListenAddr()
+}
+
 // GetRecentLogs returns the most recent log lines (up to n) joined by newlines.
 // Useful for displaying a scrolling log in the Android UI.
 func (e *FreenetEngine) GetRecentLogs(n int) string {

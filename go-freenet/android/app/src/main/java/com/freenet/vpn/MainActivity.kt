@@ -109,12 +109,13 @@ fun FreeNetScreen(
     viewModel: VpnViewModel,
     onToggle:  () -> Unit,
 ) {
-    val state       by viewModel.connectionState.collectAsState()
-    val strategy    by viewModel.strategy.collectAsState()
-    val stats       by viewModel.stats.collectAsState()
-    val splitTunnel by viewModel.splitTunnel.collectAsState()
+    val state        by viewModel.connectionState.collectAsState()
+    val strategy     by viewModel.strategy.collectAsState()
+    val stats        by viewModel.stats.collectAsState()
+    val splitTunnel  by viewModel.splitTunnel.collectAsState()
+    val engineStatus by viewModel.engineStatus.collectAsState()
     // Log lines are polled in VpnViewModel and exposed via logs StateFlow.
-    val logText     by viewModel.logs.collectAsState()
+    val logText      by viewModel.logs.collectAsState()
 
     Scaffold(
         topBar = {
@@ -145,6 +146,9 @@ fun FreeNetScreen(
 
             // Status text.
             StatusLabel(state)
+
+            // Engine diagnostic chip — always visible so user knows which mode is active.
+            EngineStatusChip(engineStatus)
 
             // Big round toggle button.
             BigToggleButton(state = state, onClick = onToggle)
@@ -601,6 +605,51 @@ fun FreeNetTheme(content: @Composable () -> Unit) {
 
 // Log and stats polling is done in VpnViewModel using FreenetVpnService.instance.
 // See VpnViewModel.startPolling() / stopPolling().
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engine status chip
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Small informational chip showing whether the Go bypass engine is active.
+ * - Green tint  → Go AAR loaded and active (full bypass + DoH DNS).
+ * - Amber tint  → Kotlin fallback (TCP only, no DNS protection).
+ * - Grey tint   → Service not yet started.
+ *
+ * This is primarily a diagnostic aid so the user knows whether the Go engine
+ * was successfully loaded from the compiled AAR.
+ */
+@Composable
+fun EngineStatusChip(status: String) {
+    val isKotlinFallback = status.contains("fallback", ignoreCase = true) ||
+                           status.contains("Kotlin",   ignoreCase = true)
+    val isError          = status.contains("Ошибка",  ignoreCase = true)
+    val bgColor = when {
+        isError          -> Color(0xFFFFCDD2) // red tint
+        isKotlinFallback -> Color(0xFFFFF9C4) // amber tint
+        else             -> Color(0xFFE8F5E9) // green tint
+    }
+    val textColor = when {
+        isError          -> Color(0xFFB71C1C)
+        isKotlinFallback -> Color(0xFFE65100)
+        else             -> Color(0xFF1B5E20)
+    }
+    Surface(
+        shape  = RoundedCornerShape(20.dp),
+        color  = bgColor,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+    ) {
+        Text(
+            text       = status,
+            fontSize   = 11.sp,
+            color      = textColor,
+            modifier   = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+            textAlign  = TextAlign.Center,
+        )
+    }
+}
 
 private fun formatBytes(bytes: Long): String = when {
     bytes < 1_024            -> "$bytes B"
