@@ -7,7 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -113,13 +115,14 @@ fun FreeNetScreen(
     viewModel: VpnViewModel,
     onToggle:  () -> Unit,
 ) {
-    val state        by viewModel.connectionState.collectAsState()
-    val strategy     by viewModel.strategy.collectAsState()
-    val stats        by viewModel.stats.collectAsState()
-    val splitTunnel  by viewModel.splitTunnel.collectAsState()
-    val engineStatus by viewModel.engineStatus.collectAsState()
+    val state              by viewModel.connectionState.collectAsState()
+    val strategy           by viewModel.strategy.collectAsState()
+    val stats              by viewModel.stats.collectAsState()
+    val splitTunnel        by viewModel.splitTunnel.collectAsState()
+    val engineStatus       by viewModel.engineStatus.collectAsState()
     // Log lines are polled in VpnViewModel and exposed via logs StateFlow.
-    val logText      by viewModel.logs.collectAsState()
+    val logText            by viewModel.logs.collectAsState()
+    val dnsBannerDismissed by viewModel.dnsBannerDismissed.collectAsState()
 
     Scaffold(
         topBar = {
@@ -168,6 +171,11 @@ fun FreeNetScreen(
             // Stats card (visible only when connected).
             if (state == VpnViewModel.ConnectionState.CONNECTED && stats.isNotEmpty()) {
                 StatsCard(statsJson = stats)
+            }
+
+            // DNS setup reminder — shown once when VPN is active until dismissed.
+            if (state == VpnViewModel.ConnectionState.CONNECTED && !dnsBannerDismissed) {
+                DnsSetupCard(onDismiss = viewModel::dismissDnsBanner)
             }
 
             // Log card (visible only when connected).
@@ -774,6 +782,103 @@ fun DiagnosticsCard(
                         fontFamily = FontFamily.Monospace,
                         color      = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DNS setup card
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One-time reminder card that guides the user to disable Android's Private DNS
+ * and Chrome's Secure DNS, which would otherwise break browser traffic by
+ * sending encrypted DNS queries on port 853 — a port that is typically blocked
+ * by Russian ISPs and now RST'd by FreeNet's TUN layer to force fallback.
+ *
+ * The card is shown while the VPN is active and hidden permanently once the
+ * user taps "Понятно".  The dismissed state persists in SharedPreferences so
+ * it survives app restarts.
+ *
+ * On Android 10+ (API 29) the "Open DNS Settings" button navigates directly to
+ * the system Private DNS screen.  On older versions a textual instruction is
+ * shown instead (Private DNS was introduced in Android 9 / API 28 but the
+ * dedicated Settings action only exists in API 29+).
+ */
+@Composable
+fun DnsSetupCard(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    // Detect whether we can open the Private DNS settings screen directly.
+    val canOpenDnsSettings = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(12.dp),
+        colors   = CardDefaults.cardColors(
+            containerColor = Color(0xFFFFF8E1), // warm amber tint — informational
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Header.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text       = "⚙️ Настройка DNS",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize   = 14.sp,
+                    color      = Color(0xFF5D4037),
+                )
+            }
+
+            HorizontalDivider(color = Color(0xFFFFECB3))
+
+            // Explanation.
+            Text(
+                text = "Для работы браузера через FreeNet отключите зашифрованный DNS:\n\n" +
+                       "1. Настройки → Подключения → Другие настройки → Частный DNS → Выключить\n" +
+                       "2. Chrome → адрес chrome://settings/security → " +
+                       "«Использовать защищённый DNS» → Выключить",
+                fontSize = 12.sp,
+                color    = Color(0xFF4E342E),
+            )
+
+            // Action buttons.
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (canOpenDnsSettings) {
+                    // Direct shortcut on Android 10+.
+                    OutlinedButton(
+                        onClick  = {
+                            context.startActivity(
+                                Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors   = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color(0xFF5D4037),
+                        ),
+                    ) {
+                        Text("Открыть настройки DNS", fontSize = 12.sp)
+                    }
+                }
+                OutlinedButton(
+                    onClick  = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    colors   = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFF5D4037),
+                    ),
+                ) {
+                    Text("Понятно", fontSize = 12.sp)
                 }
             }
         }

@@ -247,6 +247,29 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
     fun isSplitTunnelApp(pkg: String): Boolean = pkg in _splitTunnel.value.apps
 
     // -------------------------------------------------------------------------
+    // DNS setup banner
+    // -------------------------------------------------------------------------
+
+    /** Key used to persist the "DNS banner dismissed" flag across restarts. */
+    private val DNS_PREF_KEY = "dns_banner_dismissed"
+    private val prefs = app.getSharedPreferences("freenet_prefs", Context.MODE_PRIVATE)
+
+    private val _dnsBannerDismissed = MutableStateFlow(
+        prefs.getBoolean(DNS_PREF_KEY, false)
+    )
+    /**
+     * True when the user has tapped "Got it" on the DNS-setup reminder card.
+     * Persisted in SharedPreferences so it stays dismissed across restarts.
+     */
+    val dnsBannerDismissed: StateFlow<Boolean> = _dnsBannerDismissed.asStateFlow()
+
+    /** Called when the user taps the dismiss button on the DNS setup card. */
+    fun dismissDnsBanner() {
+        prefs.edit().putBoolean(DNS_PREF_KEY, true).apply()
+        _dnsBannerDismissed.value = true
+    }
+
+    // -------------------------------------------------------------------------
     // Diagnostic report
     // -------------------------------------------------------------------------
 
