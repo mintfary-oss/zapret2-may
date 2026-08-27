@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.8.5 RELEASED ✅ — THE ROOT CAUSE: wrong class name for Go engine (com.freenet.bypass.mobile.*)
+## Текущая версия: v1.8.6 RELEASED ✅ — gomobile int→long: ALL reflection calls fixed (startVPNSimple, startVPN, getRecentLogs)
 
 ---
 

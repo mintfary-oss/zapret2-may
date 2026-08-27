@@ -791,3 +791,35 @@ com/freenet/bypass/mobile/SocketProtector
 - `Class.forName("com.freenet.bypass.SocketProtector")` → `Class.forName("com.freenet.bypass.mobile.SocketProtector")`
 - proguard-rules.pro: добавлен явный `-keep class com.freenet.bypass.mobile.**`
 
+
+---
+
+### Phase 15 — gomobile int→long: финальное исправление v1.8.6
+
+**Пользователь:** "Kotlin fallback только TCP, иногда зеленело на секунду и снова ошибка"
+
+**Neo:** Скачал mobile.aar из релиза, распаковал, запустил `javap` на `FreenetEngine.class`.
+
+**Найдено:** gomobile конвертирует Go `int` → Java `long` (не `int`).
+
+Настоящие сигнатуры методов:
+```java
+// В FreenetEngine.class:
+void startVPNSimple(long, long)   // ← второй параметр long, не int!
+void startVPN(long, long, SocketProtector)  // ← второй тоже long!
+String getRecentLogs(long)         // ← параметр long, не int!
+```
+
+Наш код вызывал `getMethod("startVPNSimple", Long.TYPE, Integer.TYPE)` →
+`NoSuchMethodException` → fallback → `getMethod("startVPN", Long.TYPE, Integer.TYPE, ...)` →
+`NoSuchMethodException` → `false` → "Kotlin fallback только TCP".
+
+Зеленело кратко потому что `initGoEngine()` успевает найти класс (v1.8.5 исправил имя класса),
+ставит статус "Go engine загружен ✓", но `tryStartGoVPN` тут же фейлится из-за неверного типа
+параметра и возвращает `false`.
+
+**Исправление v1.8.6:**
+- `startVPNSimple(Long.TYPE, Long.TYPE)` + `.invoke(eng, tunFd, SOCKS5_PORT.toLong())`
+- `startVPN(Long.TYPE, Long.TYPE, protectorCls)` + `.invoke(eng, tunFd, SOCKS5_PORT.toLong(), ...)`
+- `getRecentLogs(Long.TYPE)` + `.invoke(goEngine, n.toLong())`
+

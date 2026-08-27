@@ -290,8 +290,9 @@ class FreenetVpnService : VpnService() {
      */
     fun getRecentLogs(n: Int = 100): String {
         return try {
-            goEngine?.javaClass?.getMethod("getRecentLogs", Int::class.java)
-                ?.invoke(goEngine, n) as? String ?: ""
+            // gomobile: Go int n → Java long. Use Long.TYPE and convert n.
+            goEngine?.javaClass?.getMethod("getRecentLogs", java.lang.Long.TYPE)
+                ?.invoke(goEngine, n.toLong()) as? String ?: ""
         } catch (_: Exception) { "" }
     }
 
@@ -412,19 +413,17 @@ class FreenetVpnService : VpnService() {
     private fun tryStartGoVPN(tunFd: Long): Boolean {
         val eng = goEngine ?: return false
         return try {
-            // startVPNSimple(long tunFd, int port) — no SocketProtector needed.
-            // Using Long.TYPE / Integer.TYPE (primitive) avoids NoSuchMethodException.
+            // gomobile maps Go int → Java long (not Java int).
+            // Both tunFd AND port must be Long.TYPE.
             eng.javaClass
                 .getMethod("startVPNSimple",
-                    java.lang.Long.TYPE,
-                    java.lang.Integer.TYPE)
-                .invoke(eng, tunFd, SOCKS5_PORT)
+                    java.lang.Long.TYPE,   // tunFd: long
+                    java.lang.Long.TYPE)   // port:  long (Go int → Java long)
+                .invoke(eng, tunFd, SOCKS5_PORT.toLong())
 
-            // startVPNSimple returned — TUN fd was closed (normal shutdown).
             goEngineActive = false
             true
         } catch (e: java.lang.reflect.InvocationTargetException) {
-            // Go error propagated back.  Most common: TUN fd closed by stopVpn().
             goEngineActive = false
             val cause = e.cause
             if (!isRunning.get()) {
@@ -433,10 +432,8 @@ class FreenetVpnService : VpnService() {
                 Log.e(TAG, "Go VPN error while running: $cause")
                 engineStatus = "Ошибка движка: ${cause?.message}"
             }
-            true  // AAR was present — do NOT start PacketForwarder
+            true
         } catch (e: NoSuchMethodException) {
-            // AAR older than v1.8.4 — startVPNSimple not available.
-            // Fall back to startVPN with SocketProtector (legacy path).
             Log.w(TAG, "startVPNSimple not found, trying legacy startVPN: $e")
             tryStartGoVPNLegacy(tunFd, eng)
         } catch (e: Exception) {
@@ -446,11 +443,6 @@ class FreenetVpnService : VpnService() {
         }
     }
 
-    /**
-     * Legacy fallback for AAR versions < 1.8.4 that only expose [startVPN]
-     * with a SocketProtector parameter.  Uses a [java.lang.reflect.Proxy] to
-     * implement the interface.
-     */
     private fun tryStartGoVPNLegacy(tunFd: Long, eng: Any): Boolean {
         return try {
             val protectorCls = Class.forName("com.freenet.bypass.mobile.SocketProtector")
@@ -461,12 +453,13 @@ class FreenetVpnService : VpnService() {
                 val fd = (args?.getOrNull(0) as? Long)?.toInt() ?: return@newProxyInstance false
                 protect(fd)
             }
+            // gomobile: second param (port) is also long, not int.
             eng.javaClass
                 .getMethod("startVPN",
-                    java.lang.Long.TYPE,
-                    java.lang.Integer.TYPE,
+                    java.lang.Long.TYPE,   // tunFd: long
+                    java.lang.Long.TYPE,   // port:  long (Go int → Java long)
                     protectorCls)
-                .invoke(eng, tunFd, SOCKS5_PORT, protector)
+                .invoke(eng, tunFd, SOCKS5_PORT.toLong(), protector)
             goEngineActive = false
             true
         } catch (e: ClassNotFoundException) {
