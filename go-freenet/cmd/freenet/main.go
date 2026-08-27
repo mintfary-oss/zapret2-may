@@ -18,6 +18,7 @@ import (
 	"os"
 
 	"github.com/mintfary-oss/freenet/internal/config"
+	"github.com/mintfary-oss/freenet/internal/diagnostics"
 	"github.com/mintfary-oss/freenet/internal/logs"
 	"github.com/mintfary-oss/freenet/internal/proxy"
 	"github.com/mintfary-oss/freenet/internal/telegram"
@@ -80,8 +81,13 @@ func main() {
 		log.Fatalf("proxy: %v", err)
 	}
 
+	// Attach the diagnostics monitor — it subscribes to the ring buffer and
+	// tracks errors/warnings in real time so the report is always up to date.
+	mon := diagnostics.NewMonitor(ring)
+
 	// Start web UI.
 	ui := web.NewUI(*webAddr, cfg, srv, ring)
+	ui.SetReporter(func() string { return mon.BuildReport(version, srv) })
 	if err := ui.Start(); err != nil {
 		log.Fatalf("web ui: %v", err)
 	}

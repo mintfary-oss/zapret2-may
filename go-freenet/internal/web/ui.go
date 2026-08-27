@@ -43,6 +43,14 @@ type UI struct {
 	ring       *logs.Ring
 	httpServer *http.Server
 	upgrader   websocket.Upgrader
+	// reportFn, when set, generates a plain-text diagnostic report.
+	reportFn func() string
+}
+
+// SetReporter registers a function that produces the diagnostic report text.
+// Call this before Start.
+func (u *UI) SetReporter(fn func() string) {
+	u.reportFn = fn
 }
 
 // NewUI constructs a UI. Call Start to begin listening.
@@ -68,6 +76,7 @@ func (u *UI) Start() error {
 	mux.HandleFunc("/api/strategy", u.handleStrategy)
 	mux.HandleFunc("/api/stats", u.handleStats)
 	mux.HandleFunc("/api/autodetect", u.handleAutoDetect)
+	mux.HandleFunc("/api/report", u.handleReport)
 	mux.HandleFunc("/ws/logs", u.handleLogsWS)
 
 	u.httpServer = &http.Server{
@@ -215,6 +224,18 @@ func (u *UI) handleIndex(w http.ResponseWriter, _ *http.Request) {
 // handleDownload redirects to the index page with the download tab active.
 func (u *UI) handleDownload(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/?tab=download", http.StatusSeeOther)
+}
+
+// handleReport returns a plain-text diagnostic report.
+// Pass ?download=1 to get a Content-Disposition: attachment header so the
+// browser saves the file instead of displaying it inline.
+func (u *UI) handleReport(w http.ResponseWriter, _ *http.Request) {
+	if u.reportFn == nil {
+		http.Error(w, "diagnostics not configured", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(u.reportFn()))
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -366,6 +387,7 @@ button.small.warn{background:var(--warn)}
 <div class="tabs">
   <button class="tab" id="tab-ctrl-btn"   onclick="showTab('ctrl')"    >⚙️ Управление</button>
   <button class="tab" id="tab-dl-btn"     onclick="showTab('download')" >⬇️ Скачать</button>
+  <button class="tab" id="tab-diag-btn"   onclick="showTab('diag')"     >📊 Диагностика</button>
 </div>
 
 <!-- ═══════════════════ TAB: Control Panel ═══════════════════ -->
@@ -482,18 +504,36 @@ button.small.warn{background:var(--warn)}
 </div><!-- /dl-page -->
 </div><!-- /tab-download -->
 
+<!-- ═══════════════════ TAB: Diagnostics ═══════════════════ -->
+<div id="tab-diag" style="display:none">
+<div style="width:100%;max-width:680px;display:flex;flex-direction:column;gap:.8rem;">
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+    <span style="font-size:.85rem;color:var(--muted)">Состояние, статистика соединений, DNS/ECH, ошибки, журнал</span>
+    <div style="margin-left:auto;display:flex;gap:.4rem;">
+      <button class="small" onclick="loadReport()">🔄 Обновить</button>
+      <button class="small" onclick="copyReport(this)">📋 Скопировать</button>
+      <button class="small" onclick="downloadReport()">⬇️ Скачать .txt</button>
+    </div>
+  </div>
+  <pre id="report-pre" style="background:#08080d;border:1px solid var(--border);border-radius:.75rem;padding:.9rem;height:440px;overflow-y:auto;font-family:'Consolas','Fira Mono',monospace;font-size:.74rem;line-height:1.6;color:#94a3b8;white-space:pre;word-break:normal;">загрузка…</pre>
+</div>
+</div><!-- /tab-diag -->
+
 <script>
 // ── Tab switching ─────────────────────────────────────────────────
 function showTab(name){
   document.getElementById('tab-ctrl').style.display     = name==='ctrl'     ? '' : 'none';
   document.getElementById('tab-download').style.display = name==='download' ? '' : 'none';
+  document.getElementById('tab-diag').style.display     = name==='diag'     ? '' : 'none';
   document.getElementById('log-box').style.display      = name==='ctrl'     ? '' : 'none';
   document.getElementById('tab-ctrl-btn').classList.toggle('active', name==='ctrl');
   document.getElementById('tab-dl-btn').classList.toggle('active',   name==='download');
+  document.getElementById('tab-diag-btn').classList.toggle('active', name==='diag');
   // Persist tab in URL query.
   const u = new URL(location.href);
   u.searchParams.set('tab', name);
   history.replaceState({}, '', u);
+  if(name==='diag') loadReport();
 }
 
 // Restore tab from URL on load.
@@ -533,6 +573,41 @@ function copyText(el, text){
     hint.textContent = '✓ скопировано';
     setTimeout(()=>{ hint.textContent = orig; }, 1500);
   }).catch(()=>{});
+}
+
+// ── Diagnostics tab ─────────────────────────────────────────────────
+async function loadReport(){
+  const pre = document.getElementById('report-pre');
+  if(!pre) return;
+  pre.textContent = 'Загрузка…';
+  try{
+    const r = await fetch('/api/report');
+    if(!r.ok){ pre.textContent = 'Ошибка ' + r.status; return; }
+    pre.textContent = await r.text();
+  } catch(e){
+    pre.textContent = 'Ошибка соединения: ' + e;
+  }
+}
+
+function copyReport(btn){
+  const pre = document.getElementById('report-pre');
+  navigator.clipboard.writeText(pre.textContent).then(()=>{
+    const orig = btn.textContent;
+    btn.textContent = '✓ Скопировано';
+    setTimeout(()=>{ btn.textContent = orig; }, 1500);
+  }).catch(()=> alert('Не удалось скопировать'));
+}
+
+function downloadReport(){
+  const text = document.getElementById('report-pre').textContent;
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const ts   = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+  a.href     = url;
+  a.download = 'freenet-report-' + ts + '.txt';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Control panel ─────────────────────────────────────────────────
