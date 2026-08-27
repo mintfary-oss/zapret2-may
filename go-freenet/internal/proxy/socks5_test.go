@@ -323,11 +323,11 @@ type bufConn struct {
 	w *bytes.Buffer // data that was Write()-n
 }
 
-func (c *bufConn) Read(b []byte) (int, error)  { return c.r.Read(b) }
-func (c *bufConn) Write(b []byte) (int, error) { return c.w.Write(b) }
-func (c *bufConn) Close() error                { return nil }
-func (c *bufConn) LocalAddr() net.Addr         { return nil }
-func (c *bufConn) RemoteAddr() net.Addr        { return nil }
+func (c *bufConn) Read(b []byte) (int, error)         { return c.r.Read(b) }
+func (c *bufConn) Write(b []byte) (int, error)        { return c.w.Write(b) }
+func (c *bufConn) Close() error                       { return nil }
+func (c *bufConn) LocalAddr() net.Addr                { return nil }
+func (c *bufConn) RemoteAddr() net.Addr               { return nil }
 func (c *bufConn) SetDeadline(_ time.Time) error      { return nil }
 func (c *bufConn) SetReadDeadline(_ time.Time) error  { return nil }
 func (c *bufConn) SetWriteDeadline(_ time.Time) error { return nil }
@@ -384,7 +384,7 @@ func TestCountingConn_MultipleOps(t *testing.T) {
 	cc := &countingConn{Conn: bc, in: &in, out: &out}
 
 	buf := make([]byte, 3)
-	n1, _ := cc.Read(buf)  // 3 bytes
+	n1, _ := cc.Read(buf)             // 3 bytes
 	n2, _ := cc.Write([]byte("ab"))   // 2 bytes out
 	n3, _ := cc.Write([]byte("cdef")) // 4 bytes out
 
@@ -395,4 +395,3 @@ func TestCountingConn_MultipleOps(t *testing.T) {
 		t.Errorf("BytesOut = %d, want %d", out.Load(), n2+n3)
 	}
 }
-
