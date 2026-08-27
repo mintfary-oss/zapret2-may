@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.8.6 RELEASED ✅ — gomobile int→long: ALL reflection calls fixed (startVPNSimple, startVPN, getRecentLogs)
+## Текущая версия: v1.9.2-dev — Phase 17: Diagnostics Monitor + Report Tab ✅
 
 ---
 
@@ -48,6 +48,9 @@ go-freenet/
 │   │   ├── sysproxy_windows.go       # реестр: set/restore системного прокси
 │   │   ├── sysproxy_stub.go          # заглушка (не-Windows)
 │   │   └── notify_windows.go         # WM_SETTINGCHANGE broadcast
+│   ├── diagnostics/
+│   │   ├── monitor.go                # Monitor: подписка на ring, счётчики ошибок, BuildReport()
+│   │   └── monitor_test.go           # 3 теста: ErrorCount, BuildReport, formatBytes
 │   ├── types/
 │   │   └── types.go                  # общие структуры (StatsSnapshot, etc.)
 │   ├── windivert/
@@ -249,6 +252,44 @@ freenet.exe -install
 `-telegram-chat-id` в `main.go`.
 
 ---
+
+---
+
+## Phase 17 — Diagnostics Monitor + Report Tab (v1.9.2-dev) ✅
+
+### 17.1 `internal/diagnostics/monitor.go`
+
+- `Monitor` подписывается на `logs.Ring` (ring buffer логов) и отслеживает ошибки/предупреждения в реальном времени через `watch()` goroutine
+- Счётчики: `ErrorCount()` / `WarnCount()` (атомарные)
+- `BuildReport(version, srv StatusProvider) string` — генерирует полный текстовый отчёт:
+  - Версия, время старта, uptime
+  - Статус DPI bypass + текущая стратегия + список доменов
+  - Статистика соединений (активных/всего/обойдено/байты)
+  - DNS-over-HTTPS и ECH счётчики
+  - Список ошибок и предупреждений из лога
+  - Последние 200 строк журнала
+
+### 17.2 Web UI — вкладка "📊 Диагностика"
+
+- Новый HTTP endpoint `/api/report` → `text/plain`
+- Новая вкладка **📊 Диагностика** в `internal/web/ui.go`:
+  - **🔄 Обновить** — перезагрузить отчёт
+  - **📋 Скопировать** — в буфер обмена (Clipboard API)
+  - **⬇️ Скачать .txt** — `freenet-report-<timestamp>.txt` через Blob URL
+- `UI.SetReporter(fn func() string)` — слабое связывание, нет import cycle
+
+### 17.3 Тесты
+
+| Файл | Что тестирует | Результат |
+|---|---|---|
+| `monitor_test.go` | `ErrorCount`, `WarnCount`, `BuildReport`, `formatBytes` | ✅ 3/3 PASS |
+
+### 17.4 Подключение в `main.go`
+
+```go
+mon := diagnostics.NewMonitor(ring)
+ui.SetReporter(func() string { return mon.BuildReport(version, srv) })
+```
 
 ---
 

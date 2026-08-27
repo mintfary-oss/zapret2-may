@@ -21,6 +21,8 @@
 | 13 | Android: StartVPNSimple, DNS fallback, диагностика | v1.8.4 | ✅ Завершена |
 | 14 | Android: правильное имя пакета gomobile | v1.8.5 | ✅ Завершена |
 | 15 | Android: gomobile int→long, все reflection вызовы | v1.8.6 | ✅ Завершена |
+| 16 | Phase 16 — 4 critical TUN/proxy bugs | v1.8.8 | ✅ Завершена |
+| 17 | Diagnostics Monitor + Report Tab + Download/Copy | v1.9.2 | ✅ Завершена |
 
 ---
 
@@ -175,6 +177,7 @@ CI run #53: completed / success (freenet-v1.8.1)
 | Windows ARM64 | 🟢 | Нет WinDivert ARM64 — нужно проверить поддержку |
 | proxy/transparent тесты | 🟢 | Требуют root + iptables |
 | coverage mobile > 60% | 🟢 | Требует TUN-устройство (Android VPN) |
+| diagnostics: AI-анализ паттернов | 🟢 | Расширить Monitor: детектировать зависания, петли ошибок, авто-советы |
 
 ---
 
