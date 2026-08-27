@@ -687,3 +687,50 @@ Class.forName("mobile.SocketProtector")  // gomobile экспортирует и
 5. VPN выглядел подключённым, но весь трафик падал
 
 **После фикса:** Go engine запускается → SOCKS5 на `127.0.0.1:1080` → `ForwardTUN` маршрутизирует трафик → DPI bypass работает. Внешний сервер не нужен — всё работает локально на устройстве.
+
+---
+
+### Phase 13 — Глубокий аудит кода Android (Август 2026)
+
+**Пользователь:** "VPN подключается (иконка видна), но трафик не идёт — сайты не загружаются."
+
+**Neo:** Провёл полный аудит всего кода — Kotlin/Android, Go/mobile, CI/CD. Нашёл 5 багов:
+
+#### Баг 1 — КРИТИЧЕСКИЙ: PacketForwarder fallback убивает DNS
+**Файл:** `FreenetVpnService.kt` → `tryStartGoVPN()` / `runVpnLoop()`
+
+При любом исключении (включая нормальное закрытие TUN при остановке VPN) `tryStartGoVPN` возвращал `false`. Запускался `PacketForwarder` — чистый Kotlin fallback, который обрабатывает **только TCP**. UDP (DNS-запросы на 1.1.1.1:53) **тихо отбрасывался**. Результат:
+- DNS не работает → домены не резолвятся → сайты не загружаются
+- VPN "подключён" (иконка есть, TUN создан), но трафик не идёт
+
+**Исправление:** `InvocationTargetException` (нормальное завершение Go engine) отделён от `ClassNotFoundException` (AAR отсутствует). `PacketForwarder` используется **только** когда AAR физически отсутствует.
+
+#### Баг 2 — КРИТИЧЕСКИЙ: ALLOWLIST режим → `IllegalStateException`
+**Файл:** `FreenetVpnService.kt` → `buildTunInterface()`
+
+Android запрещает смешивать `addDisallowedApplication` и `addAllowedApplication` в одном Builder. Код вызывал оба — это бросало `IllegalStateException` при переключении в режим allowlist.
+
+**Исправление:** В режиме ALLOWLIST используется только `addAllowedApplication`. FreeNet исключается автоматически (его нет в списке разрешённых).
+
+#### Баг 3: Стратегия в UI не применялась к engine
+**Файл:** `VpnViewModel.kt` → `setStrategy()`
+
+Выбор стратегии обновлял только UI-состояние. Go engine продолжал работать со старой стратегией.
+
+**Исправление:** `setStrategy()` теперь вызывает `FreenetVpnService.instance?.applyStrategy(s)`.
+
+#### Баг 4: Лог и статистика всегда пусты
+**Файл:** `MainActivity.kt` → `fetchLogs()` + `VpnViewModel.kt`
+
+`fetchLogs()` всегда возвращал `""` (placeholder). Статистика никогда не обновлялась.
+
+**Исправление:** `VpnViewModel` теперь запускает polling-корутину (каждые 2с), которая вызывает `FreenetVpnService.instance?.getRecentLogs()` и `getStats()`.
+
+#### Баг 5 (UX): Состояние CONNECTED выставлялось до подтверждения
+**Файл:** `VpnViewModel.kt`
+
+`startVpn()` сразу ставил `CONNECTED` без ожидания broadcast от сервиса.
+
+**Исправление:** ViewModel слушает `ACTION_START` и `ACTION_STOP` broadcasts. Polling стартует только при `ACTION_START`.
+
+**Дополнительно:** MTU уменьшен с 1500 до 1400 для совместимости с мобильными сетями.

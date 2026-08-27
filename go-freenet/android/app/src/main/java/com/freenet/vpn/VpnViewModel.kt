@@ -7,16 +7,22 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.VpnService
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * VpnViewModel holds the UI state for the main screen and provides helpers
  * for starting / stopping the VPN service.
  *
  * Survives configuration changes (screen rotation).  The [ConnectionState]
- * is kept in sync with the [FreenetVpnService] via a BroadcastReceiver.
+ * is kept in sync with the [FreenetVpnService] via a BroadcastReceiver and
+ * the static [FreenetVpnService.instance] reference.
  */
 class VpnViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -37,11 +43,18 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
     val strategy: StateFlow<String> = _strategy
 
     private val _stats = MutableStateFlow("")
-    /** JSON stats string from the Go engine (refreshed periodically). */
+    /** JSON stats string from the Go engine (refreshed while connected). */
     val stats: StateFlow<String> = _stats
+
+    private val _logs = MutableStateFlow("")
+    /** Recent log lines from the Go engine (refreshed while connected). */
+    val logs: StateFlow<String> = _logs.asStateFlow()
 
     /** Available strategy options shown in the strategy picker. */
     val strategies = listOf("auto", "split", "tlsrec", "combined", "fake", "none")
+
+    // Background polling job — active only while connected.
+    private var pollingJob: Job? = null
 
     // -------------------------------------------------------------------------
     // Split-tunnel (per-app VPN filtering) state
@@ -57,25 +70,72 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
     val splitTunnel: StateFlow<SplitTunnelConfig> = _splitTunnel.asStateFlow()
 
     // -------------------------------------------------------------------------
-    // BroadcastReceiver — listens for service stop broadcasts.
+    // BroadcastReceiver — listens for service start/stop broadcasts.
     // -------------------------------------------------------------------------
 
-    private val stopReceiver = object : BroadcastReceiver() {
+    private val serviceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == FreenetVpnService.ACTION_STOP) {
-                _connectionState.value = ConnectionState.DISCONNECTED
+            when (intent.action) {
+                FreenetVpnService.ACTION_START -> {
+                    _connectionState.value = ConnectionState.CONNECTED
+                    startPolling()
+                }
+                FreenetVpnService.ACTION_STOP -> {
+                    _connectionState.value = ConnectionState.DISCONNECTED
+                    stopPolling()
+                    _stats.value = ""
+                    _logs.value = ""
+                }
             }
         }
     }
 
     init {
-        val filter = IntentFilter(FreenetVpnService.ACTION_STOP)
-        app.registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        val filter = IntentFilter().apply {
+            addAction(FreenetVpnService.ACTION_START)
+            addAction(FreenetVpnService.ACTION_STOP)
+        }
+        app.registerReceiver(serviceReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+
+        // If the service is already running when the ViewModel is created (e.g.
+        // after a configuration change), start polling immediately.
+        if (FreenetVpnService.isRunning.get()) startPolling()
     }
 
     override fun onCleared() {
-        getApplication<Application>().unregisterReceiver(stopReceiver)
+        getApplication<Application>().unregisterReceiver(serviceReceiver)
+        stopPolling()
         super.onCleared()
+    }
+
+    // -------------------------------------------------------------------------
+    // Stats / log polling
+    // -------------------------------------------------------------------------
+
+    /**
+     * Polls the running engine every 2 s for stats and log lines.
+     * Runs on the IO dispatcher to avoid blocking the main thread.
+     */
+    private fun startPolling() {
+        pollingJob?.cancel()
+        pollingJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                val svc = FreenetVpnService.instance
+                if (svc != null) {
+                    val statsJson = svc.getStats()
+                    val logText   = svc.getRecentLogs(60)
+                    // Post to main thread via StateFlow (thread-safe).
+                    _stats.value = statsJson
+                    _logs.value  = logText
+                }
+                delay(2_000)
+            }
+        }
+    }
+
+    private fun stopPolling() {
+        pollingJob?.cancel()
+        pollingJob = null
     }
 
     // -------------------------------------------------------------------------
@@ -85,17 +145,6 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Returns the VPN permission intent if the user hasn't granted permission
      * yet, or null if permission is already granted (service can start directly).
-     *
-     * Usage in an Activity:
-     *
-     * ```kotlin
-     * val permIntent = viewModel.prepareVpn(this)
-     * if (permIntent != null) {
-     *     vpnPermissionLauncher.launch(permIntent)
-     * } else {
-     *     viewModel.startVpn(this)
-     * }
-     * ```
      */
     fun prepareVpn(context: Context): Intent? =
         VpnService.prepare(context)
@@ -106,8 +155,8 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
         val intent = Intent(context, FreenetVpnService::class.java)
             .setAction(FreenetVpnService.ACTION_START)
         context.startForegroundService(intent)
-        // Optimistically show CONNECTED; the service broadcasts STOP on failure.
-        _connectionState.value = ConnectionState.CONNECTED
+        // Show CONNECTING state; the service broadcasts ACTION_START on success
+        // and ACTION_STOP on failure — both update _connectionState above.
     }
 
     /** Stops the VPN service. */
@@ -136,11 +185,14 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Changes the bypass strategy. */
+    /**
+     * Changes the bypass strategy.
+     * Persists the selection in the UI and propagates to the running Go engine
+     * via the static [FreenetVpnService.instance] reference (no-op when not running).
+     */
     fun setStrategy(s: String) {
         _strategy.value = s
-        // Strategy change is applied to the running engine via the service.
-        // When the Go AAR is present, the engine reloads the strategy at runtime.
+        FreenetVpnService.instance?.applyStrategy(s)
     }
 
     /** Called by MainActivity when fresh stats JSON arrives from the service. */

@@ -31,7 +31,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
@@ -114,15 +113,8 @@ fun FreeNetScreen(
     val strategy    by viewModel.strategy.collectAsState()
     val stats       by viewModel.stats.collectAsState()
     val splitTunnel by viewModel.splitTunnel.collectAsState()
-
-    // Poll log lines from the service every 2 seconds.
-    var logText by remember { mutableStateOf("") }
-    LaunchedEffect(state) {
-        while (state == VpnViewModel.ConnectionState.CONNECTED) {
-            logText = fetchLogs()
-            delay(2_000)
-        }
-    }
+    // Log lines are polled in VpnViewModel and exposed via logs StateFlow.
+    val logText     by viewModel.logs.collectAsState()
 
     Scaffold(
         topBar = {
@@ -607,20 +599,8 @@ fun FreeNetTheme(content: @Composable () -> Unit) {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Fetches recent log lines from the running Go engine via reflection. */
-private fun fetchLogs(): String {
-    return try {
-        // Locate the singleton FreenetVpnService instance via static field.
-        val svcCls = FreenetVpnService::class.java
-        // The engine is held in the service instance — we access it via a
-        // static companion field that the service sets on start.
-        val fld = svcCls.getDeclaredField("goEngine")
-        fld.isAccessible = true
-        // Note: this only works if called from within the same process.
-        // We look it up on the service object stored in the singleton map.
-        ""  // Placeholder — log polling is wired up in a future iteration.
-    } catch (_: Exception) { "" }
-}
+// Log and stats polling is done in VpnViewModel using FreenetVpnService.instance.
+// See VpnViewModel.startPolling() / stopPolling().
 
 private fun formatBytes(bytes: Long): String = when {
     bytes < 1_024            -> "$bytes B"
