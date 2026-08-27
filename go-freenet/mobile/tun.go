@@ -198,6 +198,14 @@ func (fw *tunForwarder) handlePacket(pkt []byte) {
 			// This trades QUIC performance on unblocked sites for reliable,
 			// near-instant bypass on blocked ones via the TCP/TLS path.
 			return
+		} else if dstPort == 853 {
+			// DNS-over-TLS (DoT) runs over UDP 853.  Drop it so that
+			// Android's "Private DNS" / Chrome's Secure DNS fall back to
+			// plain UDP DNS (port 53), which we then intercept and resolve
+			// via DoH above.  Without this, the DoT connection bypasses our
+			// DoH resolver and may be blocked by the ISP, leaving the device
+			// with no DNS resolution while the VPN is active.
+			return
 		} else {
 			// Relay all other UDP traffic through a protected socket.
 			fw.handleUDPRelay(srcIP, dstIP, srcPort, dstPort, udpPayload)
@@ -238,6 +246,14 @@ func (fw *tunForwarder) handlePacket(pkt []byte) {
 	switch {
 	case isSYN && !isACK:
 		// New connection request from device.
+		if k.dstPort == 853 {
+			// DNS-over-TLS (DoT) — RST immediately so the client fails fast
+			// and falls back to plain UDP DNS (port 53), which we intercept
+			// and resolve via DoH.  Silently proxying DoT through SOCKS5
+			// would bypass our resolver and may be blocked by the ISP.
+			_ = fw.writePkt(buildRST(k.dstIP[:], k.srcIP[:], k.dstPort, k.srcPort, 0, seqNum+1))
+			return
+		}
 		go fw.handleSYN(k, seqNum)
 
 	case isFIN || isRST:
