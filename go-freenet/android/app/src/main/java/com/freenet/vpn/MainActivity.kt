@@ -1,6 +1,9 @@
 package com.freenet.vpn
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.net.VpnService
@@ -12,6 +15,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -377,13 +381,33 @@ fun LogCard(text: String) {
     val scrollState = rememberScrollState()
     // Auto-scroll to bottom when new lines arrive.
     LaunchedEffect(text) { scrollState.animateScrollTo(scrollState.maxValue) }
+    val context = LocalContext.current
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape    = RoundedCornerShape(12.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Лог", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            // Header row: title + copy button.
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                Text("Лог", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                // Copy-to-clipboard button — lets the user share log lines
+                // for debugging without needing to screenshot individual lines.
+                TextButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                                as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("FreeNet logs", text))
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Text("Копировать", fontSize = 12.sp)
+                }
+            }
             HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
             Box(
                 modifier = Modifier

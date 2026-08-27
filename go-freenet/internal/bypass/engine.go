@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"github.com/mintfary-oss/freenet/internal/config"
 	"github.com/mintfary-oss/freenet/internal/types"
@@ -106,7 +107,14 @@ func (e *Engine) RelayDomain(client, remote net.Conn, domain string) {
 	// We read the first chunk once here, check for ECH, then wrap the
 	// connection so the chosen strategy receives the same bytes it would
 	// have read itself.
+	//
+	// A 15-second deadline prevents the goroutine from blocking forever
+	// on non-TLS protocols (plain HTTP, SSH, etc.) where the client may
+	// not immediately send its first payload.  The deadline is cleared
+	// after the read so it does not affect the relay itself.
+	_ = client.SetReadDeadline(time.Now().Add(15 * time.Second))
 	first, err := readFirst(client, 4096)
+	_ = client.SetReadDeadline(time.Time{}) // clear deadline
 	if err != nil {
 		return
 	}

@@ -21,13 +21,16 @@ type AutoDetector struct {
 
 var globalDetector = &AutoDetector{}
 
-// Winner returns the last detected winning strategy, or "split" if detection
-// has not run yet.
+// Winner returns the last detected winning strategy.
+// Returns "tlsrec" before any probe has run: TLS record splitting is the most
+// universally effective bypass against ТСПУ (Russian DPI boxes) because it
+// forces the DPI system to reassemble TLS records before inspection — a more
+// expensive operation that many ТСПУ implementations skip.
 func (d *AutoDetector) Winner() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.winner == "" {
-		return "split"
+		return "tlsrec"
 	}
 	return d.winner
 }

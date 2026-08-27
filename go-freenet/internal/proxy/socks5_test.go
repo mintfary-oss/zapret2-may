@@ -2,9 +2,13 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/binary"
+	"io"
 	"net"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -307,3 +311,88 @@ func TestStats_Snapshot_Decrement(t *testing.T) {
 		t.Errorf("Active after decrement = %d, want 3", snap.Active)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// countingConn
+// ---------------------------------------------------------------------------
+
+// bufConn is a net.Conn backed by a bytes.Buffer — suitable for unit tests
+// that need a simple in-memory connection with no goroutine overhead.
+type bufConn struct {
+	r *bytes.Buffer // data to be Read()
+	w *bytes.Buffer // data that was Write()-n
+}
+
+func (c *bufConn) Read(b []byte) (int, error)  { return c.r.Read(b) }
+func (c *bufConn) Write(b []byte) (int, error) { return c.w.Write(b) }
+func (c *bufConn) Close() error                { return nil }
+func (c *bufConn) LocalAddr() net.Addr         { return nil }
+func (c *bufConn) RemoteAddr() net.Addr        { return nil }
+func (c *bufConn) SetDeadline(_ time.Time) error      { return nil }
+func (c *bufConn) SetReadDeadline(_ time.Time) error  { return nil }
+func (c *bufConn) SetWriteDeadline(_ time.Time) error { return nil }
+
+func TestCountingConn_Read_IncrementsIn(t *testing.T) {
+	data := []byte("hello world")
+	bc := &bufConn{r: bytes.NewBuffer(data), w: new(bytes.Buffer)}
+	var in, out atomic.Int64
+	cc := &countingConn{Conn: bc, in: &in, out: &out}
+
+	buf := make([]byte, len(data))
+	n, err := cc.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("Read error: %v", err)
+	}
+	if n != len(data) {
+		t.Fatalf("Read n = %d, want %d", n, len(data))
+	}
+	if in.Load() != int64(len(data)) {
+		t.Errorf("BytesIn = %d, want %d", in.Load(), len(data))
+	}
+	if out.Load() != 0 {
+		t.Errorf("BytesOut should be 0 after Read, got %d", out.Load())
+	}
+}
+
+func TestCountingConn_Write_IncrementsOut(t *testing.T) {
+	bc := &bufConn{r: new(bytes.Buffer), w: new(bytes.Buffer)}
+	var in, out atomic.Int64
+	cc := &countingConn{Conn: bc, in: &in, out: &out}
+
+	payload := []byte("response data")
+	n, err := cc.Write(payload)
+	if err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	if n != len(payload) {
+		t.Fatalf("Write n = %d, want %d", n, len(payload))
+	}
+	if out.Load() != int64(len(payload)) {
+		t.Errorf("BytesOut = %d, want %d", out.Load(), len(payload))
+	}
+	if in.Load() != 0 {
+		t.Errorf("BytesIn should be 0 after Write, got %d", in.Load())
+	}
+}
+
+func TestCountingConn_MultipleOps(t *testing.T) {
+	bc := &bufConn{
+		r: bytes.NewBuffer([]byte("12345")),
+		w: new(bytes.Buffer),
+	}
+	var in, out atomic.Int64
+	cc := &countingConn{Conn: bc, in: &in, out: &out}
+
+	buf := make([]byte, 3)
+	n1, _ := cc.Read(buf)  // 3 bytes
+	n2, _ := cc.Write([]byte("ab"))   // 2 bytes out
+	n3, _ := cc.Write([]byte("cdef")) // 4 bytes out
+
+	if in.Load() != int64(n1) {
+		t.Errorf("BytesIn = %d, want %d", in.Load(), n1)
+	}
+	if out.Load() != int64(n2+n3) {
+		t.Errorf("BytesOut = %d, want %d", out.Load(), n2+n3)
+	}
+}
+

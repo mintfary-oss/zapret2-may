@@ -262,9 +262,19 @@ func (fw *tunForwarder) handlePacket(pkt []byte) {
 				return // out-of-order; drop (no SACK)
 			}
 			tc.clientNext += uint32(len(payload))
+			seq := tc.serverNext
+			ack := tc.clientNext
 			tc.mu.Unlock()
 			_ = seqNum // used for validation above
 			_ = ackNum
+
+			// Send an immediate ACK back to the device so its retransmission
+			// timer does not fire before we have received the server response.
+			// Without this ACK the device retransmits (typically after ~200 ms),
+			// sending a duplicate TLS ClientHello to the bypass proxy and
+			// corrupting the TLS handshake — especially visible on blocked sites
+			// where the server response arrives slowly.
+			_ = fw.writePkt(buildACK(k.dstIP[:], k.srcIP[:], k.dstPort, k.srcPort, seq, ack))
 
 			if tc.upstream != nil {
 				if _, err := tc.upstream.Write(payload); err != nil {
@@ -570,6 +580,10 @@ func buildData(srcIP, dstIP []byte, srcPort, dstPort uint16, seq, ack uint32, da
 
 func buildFIN(srcIP, dstIP []byte, srcPort, dstPort uint16, seq, ack uint32) []byte {
 	return buildTCPPacket(srcIP, dstIP, srcPort, dstPort, seq, ack, 0x11 /*FIN+ACK*/, nil)
+}
+
+func buildACK(srcIP, dstIP []byte, srcPort, dstPort uint16, seq, ack uint32) []byte {
+	return buildTCPPacket(srcIP, dstIP, srcPort, dstPort, seq, ack, 0x10 /*ACK*/, nil)
 }
 
 // buildTCPPacket crafts a complete IPv4/TCP packet with correct checksums.

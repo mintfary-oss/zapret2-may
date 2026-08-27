@@ -219,6 +219,29 @@ func TestBuildFIN_FlagsSet(t *testing.T) {
 	}
 }
 
+func TestBuildACK_FlagsSet(t *testing.T) {
+	src := net.IP{10, 0, 0, 1}.To4()
+	dst := net.IP{10, 0, 0, 2}.To4()
+	pkt := buildACK(src, dst, 8080, 54321, 42, 99)
+	// ACK flag only = 0x10.
+	if pkt[33] != 0x10 {
+		t.Errorf("ACK flags = %02x, want 0x10 (ACK only)", pkt[33])
+	}
+	// Verify sequence and ACK numbers are encoded in the TCP header.
+	seqInPkt := binary.BigEndian.Uint32(pkt[24:28]) // TCP seq at offset 20+4
+	ackInPkt := binary.BigEndian.Uint32(pkt[28:32]) // TCP ack at offset 20+8
+	if seqInPkt != 42 {
+		t.Errorf("seq = %d, want 42", seqInPkt)
+	}
+	if ackInPkt != 99 {
+		t.Errorf("ack = %d, want 99", ackInPkt)
+	}
+	// No payload — packet should be exactly IP(20)+TCP(20) bytes.
+	if len(pkt) != 40 {
+		t.Errorf("ACK packet len = %d, want 40", len(pkt))
+	}
+}
+
 func TestBuildData_ContainsPayload(t *testing.T) {
 	src := net.IP{10, 0, 0, 1}.To4()
 	dst := net.IP{10, 0, 0, 2}.To4()

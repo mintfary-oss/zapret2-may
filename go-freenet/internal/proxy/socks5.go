@@ -7,7 +7,33 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync/atomic"
 )
+
+// countingConn wraps a net.Conn and increments the provided counters on every
+// Read (bytes_in) and Write (bytes_out).  Used to populate Stats.BytesIn /
+// Stats.BytesOut without modifying the relay helpers.
+type countingConn struct {
+	net.Conn
+	in  *atomic.Int64
+	out *atomic.Int64
+}
+
+func (c *countingConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if n > 0 {
+		c.in.Add(int64(n))
+	}
+	return n, err
+}
+
+func (c *countingConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if n > 0 {
+		c.out.Add(int64(n))
+	}
+	return n, err
+}
 
 const (
 	socks5Version    = 0x05
@@ -64,16 +90,29 @@ func (s *Server) handleSOCKS(client net.Conn) {
 	s.Stats.Total.Add(1)
 	defer s.Stats.Active.Add(-1)
 
+	// Wrap both connections with byte-counting so Stats.BytesIn /
+	// Stats.BytesOut reflect actual traffic through the proxy.
+	//
+	// Convention: data flowing FROM the client (device) is bytes_in from
+	// the proxy's perspective (client→proxy reads); data flowing TO the
+	// client is bytes_out (proxy→client writes).  We attach counters to
+	// the client side only — the remote side mirrors the same bytes.
+	countedClient := &countingConn{
+		Conn: client,
+		in:   &s.Stats.BytesIn,
+		out:  &s.Stats.BytesOut,
+	}
+
 	// Extract the host part (strip port) for hostlist lookup.
 	host, _, _ := net.SplitHostPort(target)
 
 	// Relay traffic through the bypass engine if enabled.
 	if s.enabled.Load() {
 		s.Stats.Bypassed.Add(1)
-		s.engine.RelayDomain(client, remote, host)
+		s.engine.RelayDomain(countedClient, remote, host)
 	} else {
 		s.Stats.Passthrough.Add(1)
-		relay(client, remote)
+		relay(countedClient, remote)
 	}
 }
 
