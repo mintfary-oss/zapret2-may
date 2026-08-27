@@ -12,13 +12,15 @@ import (
 // fakeServer implements StatusProvider for tests.
 type fakeServer struct{}
 
-func (f *fakeServer) Enabled() bool                      { return true }
-func (f *fakeServer) Strategy() string                   { return "auto" }
-func (f *fakeServer) GetStats() types.StatsSnapshot      { return types.StatsSnapshot{Total: 42, Bypassed: 38} }
-func (f *fakeServer) HostlistSize() int                  { return 12345 }
-func (f *fakeServer) DNSEnabled() bool                   { return true }
-func (f *fakeServer) DNSStats() (int64, int64)           { return 100, 2 }
-func (f *fakeServer) ECHPassthroughs() int64             { return 7 }
+func (f *fakeServer) Enabled() bool    { return true }
+func (f *fakeServer) Strategy() string { return "auto" }
+func (f *fakeServer) GetStats() types.StatsSnapshot {
+	return types.StatsSnapshot{Total: 42, Bypassed: 38}
+}
+func (f *fakeServer) HostlistSize() int        { return 12345 }
+func (f *fakeServer) DNSEnabled() bool         { return true }
+func (f *fakeServer) DNSStats() (int64, int64) { return 100, 2 }
+func (f *fakeServer) ECHPassthroughs() int64   { return 7 }
 
 func TestMonitorErrorCount(t *testing.T) {
 	ring := logs.NewRing(100)
