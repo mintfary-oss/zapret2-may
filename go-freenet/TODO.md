@@ -22,7 +22,8 @@
 | 14 | Android: правильное имя пакета gomobile | v1.8.5 | ✅ Завершена |
 | 15 | Android: gomobile int→long, все reflection вызовы | v1.8.6 | ✅ Завершена |
 | 16 | Phase 16 — 4 critical TUN/proxy bugs | v1.8.8 | ✅ Завершена |
-| 17 | Diagnostics Monitor + Report Tab + Download/Copy | v1.9.2 | ✅ Завершена |
+| 17 | Diagnostics Monitor + Report Tab + Download/Copy | v1.9.0 | ✅ Завершена |
+| 18 | Auto-block DoT port 853 + DNS Setup Card | v1.9.1 | ✅ Завершена |
 
 ---
 

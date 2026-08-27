@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.9.2-dev — Phase 17: Diagnostics Monitor + Report Tab ✅
+## Текущая версия: v1.9.1 — Phase 18: Auto-block DoT + DNS Setup Card ✅
 
 ---
 
@@ -255,7 +255,41 @@ freenet.exe -install
 
 ---
 
-## Phase 17 — Diagnostics Monitor + Report Tab (v1.9.2-dev) ✅
+## Phase 18 — Auto-block DoT port 853 + DNS Setup Card (v1.9.1) ✅
+
+### Проблема
+Браузер не загружал сайты при включённом VPN. Android **Private DNS** и Chrome **Secure DNS**
+отправляли DNS-запросы по протоколу DNS-over-TLS (DoT, порт 853). Этот порт:
+1. Заблокирован российскими провайдерами (ТСПУ)
+2. Обходил DoH-резолвер FreeNet (TUN перехватывал только UDP порт 53)
+
+### 18.1 Go TUN (`mobile/tun.go`) — автоматически ✅
+
+| Пакет | Действие | Эффект |
+|-------|----------|--------|
+| UDP порт 853 | Drop | DoT над UDP блокируется |
+| TCP SYN порт 853 | RST | DoT над TCP блокируется, немедленный fallback |
+
+Chrome/Android получают мгновенный отказ и переключаются на UDP DNS 53 → FreeNet
+перехватывает и резолвит через DoH. Никаких действий пользователя не требуется.
+
+### 18.2 Android UI (`MainActivity.kt`, `VpnViewModel.kt`) ✅
+
+- **`DnsSetupCard`** — карточка с тёплым фоном, появляется при первом подключении VPN
+- **Android 10+**: кнопка «Открыть настройки DNS» → `Settings.ACTION_PRIVATE_DNS_SETTINGS` (один тап)
+- **«Понятно»** — скрывает карточку навсегда (SharedPreferences `dns_banner_dismissed`)
+- Объяснение Chrome Secure DNS (`chrome://settings/security`)
+
+### 18.3 Что осталось ручным
+
+| Шаг | Почему нельзя автоматизировать |
+|-----|-------------------------------|
+| Отключение Private DNS в настройках Android | Требует системные привилегии |
+| Отключение Secure DNS в Chrome | Chrome не предоставляет API для сторонних приложений |
+
+---
+
+## Phase 17 — Diagnostics Monitor + Report Tab (v1.9.0) ✅
 
 ### 17.1 `internal/diagnostics/monitor.go`
 
