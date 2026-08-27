@@ -189,6 +189,15 @@ func (fw *tunForwarder) handlePacket(pkt []byte) {
 		if dstPort == 53 && fw.dohClient != nil {
 			// Intercept DNS queries and resolve via DoH.
 			go fw.handleDNSQuery(srcIP, dstIP, srcPort, dstPort, udpPayload)
+		} else if dstPort == 443 {
+			// QUIC (HTTP/3) runs over UDP 443.  Russian ISPs (ТСПУ) typically
+			// block QUIC to blocked destinations; the packet is silently dropped
+			// and the app waits 10–30 s for a timeout before falling back to
+			// TCP/TLS.  By dropping UDP 443 here the OS immediately sees the
+			// connection as unreachable and forces TCP fallback within ~100 ms.
+			// This trades QUIC performance on unblocked sites for reliable,
+			// near-instant bypass on blocked ones via the TCP/TLS path.
+			return
 		} else {
 			// Relay all other UDP traffic through a protected socket.
 			fw.handleUDPRelay(srcIP, dstIP, srcPort, dstPort, udpPayload)
