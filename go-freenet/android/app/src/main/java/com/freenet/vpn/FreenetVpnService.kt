@@ -33,6 +33,10 @@ class FreenetVpnService : VpnService() {
         const val ACTION_START = "com.freenet.vpn.ACTION_START"
         const val ACTION_STOP  = "com.freenet.vpn.ACTION_STOP"
 
+        /** Broadcast this intent to change the bypass strategy at runtime. */
+        const val ACTION_SET_STRATEGY = "com.freenet.vpn.ACTION_SET_STRATEGY"
+        const val EXTRA_STRATEGY      = "strategy"
+
         /** SOCKS5 port that the Go bypass proxy listens on. */
         const val SOCKS5_PORT = 1080
 
@@ -49,8 +53,17 @@ class FreenetVpnService : VpnService() {
 
         private const val TAG = "FreenetVpnService"
 
-        /** Shared running state — used by MainActivity to update the UI. */
+        /** Shared running state — used by MainActivity/ViewModel to check the UI. */
         val isRunning = AtomicBoolean(false)
+
+        /**
+         * Singleton reference set while the service is alive.
+         * Used by [VpnViewModel] to read logs/stats and set strategy without
+         * binding to the service.  Nullable — always check before use.
+         */
+        @Volatile
+        var instance: FreenetVpnService? = null
+            private set
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -70,6 +83,7 @@ class FreenetVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createNotificationChannel()
         initGoEngine()
     }
@@ -79,6 +93,11 @@ class FreenetVpnService : VpnService() {
             ACTION_STOP -> {
                 stopVpn()
                 stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_SET_STRATEGY -> {
+                val strategy = intent.getStringExtra(EXTRA_STRATEGY)
+                if (!strategy.isNullOrBlank()) applyStrategy(strategy)
                 return START_NOT_STICKY
             }
             else -> startVpn()  // ACTION_START or default (re-start after kill)
@@ -94,6 +113,7 @@ class FreenetVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        instance = null
         super.onDestroy()
         stopVpn()
     }
@@ -168,33 +188,45 @@ class FreenetVpnService : VpnService() {
      * Per-app split-tunnel filtering is applied from [SplitTunnelConfig].
      */
     private fun buildTunInterface(): ParcelFileDescriptor {
+        val splitCfg = SplitTunnelConfig.load(this)
+
         val builder = Builder()
             .setSession(getString(R.string.app_name))
             .addAddress(TUN_ADDRESS, TUN_PREFIX)
             .addRoute("0.0.0.0", 0)
             .addDnsServer(DNS_SERVER)
-            .setMtu(1500)
-            // Always exclude FreeNet itself so our SOCKS5 dial doesn't loop.
-            .addDisallowedApplication(packageName)
+            .setMtu(1400) // leave headroom for any encapsulation / fragmentation
 
-        // Apply per-app split-tunnel configuration.
-        val splitCfg = SplitTunnelConfig.load(this)
-        if (splitCfg.mode != SplitTunnelConfig.MODE_DISABLED && splitCfg.apps.isNotEmpty()) {
-            val pm = packageManager
-            when (splitCfg.mode) {
-                SplitTunnelConfig.MODE_ALLOWLIST -> {
-                    // Only listed apps go through the VPN.
-                    splitCfg.apps.forEach { pkg ->
-                        if (isPackageInstalled(pm, pkg)) {
-                            builder.addAllowedApplication(pkg)
-                        }
+        // Per-app split-tunnel configuration.
+        //
+        // IMPORTANT: Android forbids mixing addAllowedApplication and
+        // addDisallowedApplication on the same Builder — doing so throws
+        // IllegalStateException.  Therefore we choose one approach:
+        //
+        //  DISABLED  → addDisallowedApplication(us)     — all others go through VPN
+        //  BLOCKLIST → addDisallowedApplication(us+list) — all others go through VPN
+        //  ALLOWLIST → addAllowedApplication(list)       — only listed apps go through VPN
+        //              (FreeNet is NOT in the allowlist → its traffic bypasses VPN automatically)
+        val pm = packageManager
+        when {
+            splitCfg.mode == SplitTunnelConfig.MODE_ALLOWLIST && splitCfg.apps.isNotEmpty() -> {
+                // Allowlist: only the chosen apps are routed through VPN.
+                // We intentionally do NOT add packageName here — FreeNet is excluded
+                // because it is not in the allowlist (Android bypasses unlisted apps).
+                splitCfg.apps.forEach { pkg ->
+                    if (pkg != packageName && isPackageInstalled(pm, pkg)) {
+                        builder.addAllowedApplication(pkg)
                     }
-                    Log.i(TAG, "Split tunnel ALLOWLIST: ${splitCfg.apps.size} app(s)")
                 }
-                SplitTunnelConfig.MODE_BLOCKLIST -> {
-                    // All apps except listed ones go through the VPN.
+                Log.i(TAG, "Split tunnel ALLOWLIST: ${splitCfg.apps.size} app(s)")
+            }
+            else -> {
+                // DISABLED or BLOCKLIST: use disallowed list.
+                // Always exclude FreeNet so its own SOCKS5 connections don't loop.
+                builder.addDisallowedApplication(packageName)
+                if (splitCfg.mode == SplitTunnelConfig.MODE_BLOCKLIST && splitCfg.apps.isNotEmpty()) {
                     splitCfg.apps.forEach { pkg ->
-                        if (isPackageInstalled(pm, pkg) && pkg != packageName) {
+                        if (pkg != packageName && isPackageInstalled(pm, pkg)) {
                             builder.addDisallowedApplication(pkg)
                         }
                     }
@@ -215,6 +247,47 @@ class FreenetVpnService : VpnService() {
         } catch (_: PackageManager.NameNotFoundException) {
             false
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Engine control (strategy, logs, stats) — called by ViewModel / UI
+    // -------------------------------------------------------------------------
+
+    /**
+     * Changes the active bypass strategy on the running Go engine.
+     * Safe to call at any time; no-op if the engine is not running.
+     */
+    fun applyStrategy(strategy: String) {
+        try {
+            goEngine?.javaClass?.getMethod("setStrategy", String::class.java)
+                ?.invoke(goEngine, strategy)
+            Log.i(TAG, "Strategy set to: $strategy")
+        } catch (e: Exception) {
+            Log.e(TAG, "applyStrategy failed: $e")
+        }
+    }
+
+    /**
+     * Returns the most recent [n] log lines from the Go engine, or an empty
+     * string if the engine is not running.
+     */
+    fun getRecentLogs(n: Int = 100): String {
+        return try {
+            goEngine?.javaClass?.getMethod("getRecentLogs", Int::class.java)
+                ?.invoke(goEngine, n) as? String ?: ""
+        } catch (_: Exception) { "" }
+    }
+
+    /**
+     * Returns a JSON stats string from the Go engine, e.g.:
+     * {"active":2,"total":15,"bytes_in":102400,...}
+     * Returns an empty string if the engine is not running.
+     */
+    fun getStats(): String {
+        return try {
+            goEngine?.javaClass?.getMethod("getStats")
+                ?.invoke(goEngine) as? String ?: ""
+        } catch (_: Exception) { "" }
     }
 
     // -------------------------------------------------------------------------
@@ -256,37 +329,54 @@ class FreenetVpnService : VpnService() {
     }
 
     /**
-     * Runs the VPN loop:
-     *  - If the Go engine AAR is available: calls [mobile.FreenetEngine.startVPN]
-     *    which starts the SOCKS5 proxy and the TUN forwarder in Go.
-     *  - Fallback: uses the pure-Kotlin [PacketForwarder] (basic TCP forwarding
-     *    without DPI bypass; useful for testing without a built AAR).
+     * Runs the VPN loop.
+     *
+     * If the Go AAR is present ([goEngine] != null) the Go TUN forwarder handles
+     * everything — TCP, UDP, and DNS-over-HTTPS intercept.  The Kotlin
+     * [PacketForwarder] is used ONLY when the AAR is NOT compiled in (e.g. a
+     * local build without scripts/build-android.sh).
+     *
+     * IMPORTANT: Do NOT fall back to [PacketForwarder] when the Go engine is
+     * present but returned an error.  PacketForwarder is TCP-only; it silently
+     * drops UDP, so DNS queries (UDP → 1.1.1.1:53) are never answered and every
+     * domain resolution fails → "VPN on but no traffic" symptom.
      */
     private fun runVpnLoop(tunFd: Long) {
-        val goStarted = tryStartGoVPN(tunFd)
-        if (!goStarted) {
-            Log.i(TAG, "Falling back to Kotlin PacketForwarder (no bypass)")
+        val aarPresent = tryStartGoVPN(tunFd)
+        if (!aarPresent) {
+            // Go AAR not compiled in — use pure-Kotlin TCP-only fallback.
+            // DNS (UDP port 53) will NOT work in this mode.  This path is only
+            // intended for development builds without a prebuilt AAR.
+            Log.w(TAG, "Go AAR absent — Kotlin PacketForwarder running (TCP only, no DNS)")
             PacketForwarder(
-                tunFd      = tunFd,
-                socksAddr  = "127.0.0.1:$SOCKS5_PORT",
-                protect    = ::protect,
+                tunFd     = tunFd,
+                socksAddr = "127.0.0.1:$SOCKS5_PORT",
+                protect   = ::protect,
             ).run()
         }
+        // aarPresent == true: Go engine ran and has now stopped; VPN will be torn down.
     }
 
     /**
-     * Attempts to start the Go VPN (SOCKS5 + TUN forwarder) via reflection.
-     * Returns true if the Go engine started and ran; false if the AAR is absent.
+     * Starts the Go VPN engine via reflection and **blocks** until it stops.
+     *
+     * Returns:
+     *  - **true**  — AAR was present.  Go engine ran and has now ended (either
+     *                because the TUN fd was closed by [stopVpn], or due to a Go
+     *                error).  Caller must NOT start PacketForwarder.
+     *  - **false** — AAR is absent (ClassNotFoundException).  Caller may start
+     *                the Kotlin fallback.
+     *
+     * Shutdown path: [stopVpn] closes the TUN fd → Go's ForwardTUN returns an
+     * error → gomobile wraps it as [java.lang.reflect.InvocationTargetException].
+     * We catch that here and return **true** (engine ran; don't fall back).
      */
     private fun tryStartGoVPN(tunFd: Long): Boolean {
         val eng = goEngine ?: return false
         return try {
-            // gomobile bind uses -javapkg com.freenet.bypass, so the generated
-            // SocketProtector interface is com.freenet.bypass.SocketProtector,
-            // NOT "mobile.SocketProtector" (old incorrect name).
-            //
-            // gomobile generates methods with Java primitive types (long, int).
-            // Must use Long.TYPE / Integer.TYPE — NOT Long::class.java (boxed).
+            // gomobile bind uses -javapkg com.freenet.bypass.
+            // Use Long.TYPE / Integer.TYPE (primitive types) — NOT Long::class.java
+            // (boxed) — otherwise getMethod throws NoSuchMethodException.
             val protectorCls = Class.forName("com.freenet.bypass.SocketProtector")
             val protector = java.lang.reflect.Proxy.newProxyInstance(
                 protectorCls.classLoader,
@@ -303,13 +393,26 @@ class FreenetVpnService : VpnService() {
                     protectorCls)
                 .invoke(eng, tunFd, SOCKS5_PORT, protector)
 
+            // startVPN returned nil error (rare — normally shutdown closes TUN first).
             true
         } catch (e: ClassNotFoundException) {
-            Log.w(TAG, "Go AAR absent (com.freenet.bypass.SocketProtector) — using Kotlin fallback")
+            // AAR classes not found — not compiled in.
+            Log.w(TAG, "Go AAR absent — Kotlin fallback will handle traffic")
             false
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            // Go's StartVPN returned a non-nil error.  The most common case is
+            // the TUN fd being closed by stopVpn() — that is normal shutdown.
+            val cause = e.cause
+            if (!isRunning.get()) {
+                Log.d(TAG, "Go VPN ended (normal shutdown): ${cause?.message}")
+            } else {
+                Log.e(TAG, "Go VPN error while running: $cause")
+            }
+            true  // AAR was present and ran — do NOT start PacketForwarder
         } catch (e: Exception) {
-            Log.e(TAG, "tryStartGoVPN failed: $e")
-            false
+            // Reflection setup failure (e.g. NoSuchMethodException).
+            Log.e(TAG, "tryStartGoVPN reflection setup failed: $e")
+            false  // Treat as AAR absent; PacketForwarder is better than nothing
         }
     }
 
