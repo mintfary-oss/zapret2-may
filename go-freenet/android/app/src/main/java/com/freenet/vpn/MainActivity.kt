@@ -175,6 +175,15 @@ fun FreeNetScreen(
                 LogCard(text = logText)
             }
 
+            // Diagnostics card — collapsible, shows error badge, copy + share.
+            if (state == VpnViewModel.ConnectionState.CONNECTED) {
+                DiagnosticsCard(
+                    logText      = logText,
+                    engineStatus = engineStatus,
+                    onReport     = viewModel::buildReport,
+                )
+            }
+
             // Per-app split-tunnel card (always shown).
             SplitTunnelCard(
                 config   = splitTunnel,
@@ -602,6 +611,174 @@ fun SplitTunnelCard(
 
 /** Minimal data class holding one installed app entry. */
 private data class AppEntry(val packageName: String, val label: String)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Diagnostics card
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Collapsible card that summarises engine health and lets the user copy or
+ * share a full plain-text diagnostic report.
+ *
+ * - Collapsed: shows "📊 Диагностика" header + red badge if errors detected.
+ * - Expanded:  engine-status line, error count, last-20-lines log preview,
+ *              "Скопировать" and "Поделиться" buttons.
+ *
+ * [onReport] is called synchronously on click — it builds the report string
+ * from ViewModel state (pure string work, no I/O).
+ */
+@Composable
+fun DiagnosticsCard(
+    logText:      String,
+    engineStatus: String,
+    onReport:     () -> String,
+) {
+    val context  = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+
+    // Count error-level lines so we can show the badge even when collapsed.
+    val errorCount = remember(logText) {
+        logText.lines().count { line ->
+            line.lowercase().let { "error" in it || "fatal" in it || "fail" in it }
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+
+            // ── Header row ─────────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("📊 Диагностика", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    if (errorCount > 0) {
+                        Surface(
+                            shape    = RoundedCornerShape(8.dp),
+                            color    = Color(0xFFFFCDD2),
+                        ) {
+                            Text(
+                                text     = "$errorCount ошибок",
+                                fontSize = 11.sp,
+                                color    = Color(0xFFB71C1C),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text  = if (expanded) "▲" else "▼",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // ── Expanded content ───────────────────────────────────────────
+            if (expanded) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(10.dp))
+
+                // Engine status line.
+                Text(
+                    text     = engineStatus,
+                    fontSize = 11.sp,
+                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                // Error summary.
+                if (errorCount > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text       = "⚠ Ошибок в логе: $errorCount — скопируйте отчёт и отправьте в поддержку",
+                        fontSize   = 12.sp,
+                        color      = Color(0xFFB71C1C),
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+
+                // Action buttons.
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick  = {
+                            val report    = onReport()
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                                    as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(
+                                android.content.ClipData.newPlainText("FreeNet Diagnostics", report)
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("📋 Скопировать", fontSize = 12.sp)
+                    }
+                    OutlinedButton(
+                        onClick  = {
+                            val report = onReport()
+                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, "FreeNet — Диагностика")
+                                putExtra(android.content.Intent.EXTRA_TEXT, report)
+                            }
+                            context.startActivity(
+                                android.content.Intent.createChooser(intent, "Поделиться отчётом")
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("📤 Поделиться", fontSize = 12.sp)
+                    }
+                }
+
+                // Log preview — last 20 lines.
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(6.dp))
+                Text("Последние записи:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(4.dp))
+
+                val preview = remember(logText) {
+                    logText.lines().takeLast(20).joinToString("\n")
+                }
+                val previewScroll = rememberScrollState()
+                LaunchedEffect(preview) { previewScroll.animateScrollTo(previewScroll.maxValue) }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 180.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                        )
+                        .padding(8.dp)
+                        .verticalScroll(previewScroll),
+                ) {
+                    Text(
+                        text       = preview,
+                        fontSize   = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme

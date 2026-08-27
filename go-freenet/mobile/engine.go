@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/mintfary-oss/freenet/internal/config"
@@ -146,7 +147,24 @@ func (e *FreenetEngine) IsRunning() bool {
 
 // GetVersion returns the FreeNet version string.
 func (e *FreenetEngine) GetVersion() string {
-	return "1.0.0"
+	return "1.8.8"
+}
+
+// GetErrorCount returns the number of error-level messages recorded since
+// the engine started.  Counts lines that contain "error", "fatal", or "fail"
+// (case-insensitive) across the entire ring buffer.
+func (e *FreenetEngine) GetErrorCount() int {
+	entries := e.ring.Recent(500)
+	count := 0
+	for _, entry := range entries {
+		lower := strings.ToLower(entry.Message)
+		if strings.Contains(lower, "error") ||
+			strings.Contains(lower, "fatal") ||
+			strings.Contains(lower, "fail") {
+			count++
+		}
+	}
+	return count
 }
 
 // GetStats returns a JSON-encoded string with proxy statistics.
