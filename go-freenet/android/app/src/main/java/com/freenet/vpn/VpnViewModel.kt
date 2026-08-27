@@ -245,4 +245,92 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Returns true when [pkg] is currently in the split-tunnel app list. */
     fun isSplitTunnelApp(pkg: String): Boolean = pkg in _splitTunnel.value.apps
+
+    // -------------------------------------------------------------------------
+    // Diagnostic report
+    // -------------------------------------------------------------------------
+
+    /**
+     * Assembles a plain-text diagnostic report from current engine state.
+     * Pure string manipulation — safe to call on the main thread from a
+     * button click handler.
+     */
+    fun buildReport(): String {
+        val ts = java.text.SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()
+        ).format(java.util.Date())
+
+        val stateStr = when (_connectionState.value) {
+            ConnectionState.CONNECTED    -> "ВКЛЮЧЕНО ✓"
+            ConnectionState.CONNECTING   -> "ПОДКЛЮЧЕНИЕ..."
+            ConnectionState.DISCONNECTED -> "ВЫКЛЮЧЕНО"
+        }
+
+        // Tiny JSON extractor — avoids adding a library dependency.
+        fun stat(key: String): String =
+            Regex(""""$key"\s*:\s*(\d+)""").find(_stats.value)
+                ?.groupValues?.get(1) ?: "0"
+
+        val bytesIn  = stat("bytes_in").toLongOrNull()  ?: 0L
+        val bytesOut = stat("bytes_out").toLongOrNull() ?: 0L
+
+        val logLines   = _logs.value.lines()
+        val errorLines = logLines.filter { line ->
+            line.lowercase().let { "error" in it || "fatal" in it || "fail" in it }
+        }
+        val warnLines = logLines.filter { "warn" in it.lowercase() }
+
+        val sep = "─".repeat(52)
+
+        return buildString {
+            appendLine("╔══════════════════════════════════════════════════╗")
+            appendLine("║       FreeNet — Диагностика Android              ║")
+            appendLine("╚══════════════════════════════════════════════════╝")
+            appendLine()
+            appendLine("Сгенерирован:    $ts")
+            appendLine("Движок:          ${_engineStatus.value}")
+            appendLine()
+            appendLine("СОСТОЯНИЕ")
+            appendLine(sep)
+            appendLine("Обход DPI:       $stateStr")
+            appendLine("Стратегия:       ${_strategy.value}")
+            appendLine()
+            appendLine("СТАТИСТИКА СОЕДИНЕНИЙ")
+            appendLine(sep)
+            appendLine("Активных:        ${stat("active")}")
+            appendLine("Всего:           ${stat("total")}")
+            appendLine("Обойдено DPI:    ${stat("bypassed")}")
+            appendLine("Без обхода:      ${stat("passthrough")}")
+            appendLine("Принято:         ${fmtBytes(bytesIn)}")
+            appendLine("Отправлено:      ${fmtBytes(bytesOut)}")
+            appendLine()
+            appendLine("ДИАГНОСТИКА")
+            appendLine(sep)
+            appendLine("Ошибок в логе:   ${errorLines.size}")
+            appendLine("Предупреждений:  ${warnLines.size}")
+            if (errorLines.isNotEmpty()) {
+                appendLine()
+                appendLine("ОШИБКИ:")
+                errorLines.forEach { appendLine("  $it") }
+            }
+            if (warnLines.isNotEmpty()) {
+                appendLine()
+                appendLine("ПРЕДУПРЕЖДЕНИЯ:")
+                warnLines.forEach { appendLine("  $it") }
+            }
+            appendLine()
+            appendLine("ЖУРНАЛ (последние 100 строк)")
+            appendLine(sep)
+            logLines.takeLast(100).forEach { appendLine("  $it") }
+            appendLine()
+            appendLine("── конец отчёта ─────────────────────────────────")
+        }
+    }
+
+    private fun fmtBytes(n: Long): String = when {
+        n >= 1_073_741_824L -> "%.2f ГБ".format(n / 1_073_741_824.0)
+        n >= 1_048_576L     -> "%.1f МБ".format(n / 1_048_576.0)
+        n >= 1_024L         -> "%.1f КБ".format(n / 1_024.0)
+        else                -> "$n Б"
+    }
 }
