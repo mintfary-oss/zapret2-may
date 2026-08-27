@@ -270,4 +270,108 @@ curl -fsSL -o /tmp/windivert.zip "$WD_URL"
 | Ошибки аутентификации | 2 | ✅ Исправлены |
 | Ограничения реализации | 2 | 🔄 В плане |
 | Ошибки CI/CD | 6 | ✅ Исправлены |
-| **Итого** | **13** | |
+| Ошибки Android reflection (gomobile) | 5 | ✅ Исправлены |
+| **Итого** | **18** | |
+
+---
+
+## Ошибки Android / gomobile reflection (Phase 13–15)
+
+### ERR-ANDROID-01: PacketForwarder запускался вместо Go engine
+
+**Версии:** v1.8.1–v1.8.3  
+**Симптом:** "VPN включился но сайты не открываются"
+
+**Причина:** `tryStartGoVPN` перехватывал `InvocationTargetException` (нормальное закрытие TUN)
+как обычный `Exception` → возвращал `false` → запускался `PacketForwarder` (только TCP, без DNS).
+
+**Исправление:** Разделены обработчики `InvocationTargetException` и `Exception`.  
+При нормальном закрытии TUN возвращается `true` (AAR присутствовал), PacketForwarder не стартует.
+
+---
+
+### ERR-ANDROID-02: Silent DNS drop
+
+**Версии:** v1.0–v1.8.3  
+**Симптом:** Сайты не открываются — DNS резолюция зависала на 5+ сек и падала без ответа.
+
+**Причина:** В `handleDNSQuery` при ошибке DoH запрос просто `return` (дроп без ответа).
+Устройство ждало таймаут (~5 сек/запрос) перед следующей попыткой.
+
+**Исправление (v1.8.4):** Цепочка 3 уровней:
+1. DoH (зашифрованный, обходит ISP DNS poisoning)
+2. UDP fallback (8.8.8.8, 1.1.1.1, 9.9.9.9 — прямой UDP без TUN)
+3. SERVFAIL response — немедленный ответ чтобы устройство сразу узнало об ошибке
+
+---
+
+### ERR-ANDROID-03: Неверное имя пакета gomobile
+
+**Версии:** v1.0–v1.8.4  
+**Симптом:** "Kotlin fallback только TCP" — Go engine всегда показывался недоступным.
+
+**Причина:** `gomobile bind -javapkg com.freenet.bypass ./mobile` генерирует классы в пакете
+`com.freenet.bypass.mobile` (имя Go пакета `mobile` добавляется к Java prefix).
+
+Код искал: `Class.forName("com.freenet.bypass.Mobile")` → `ClassNotFoundException`  
+Реальное расположение: `com.freenet.bypass.mobile.Mobile`
+
+**Верификация:** Скачан APK, распакован, Python-скриптом отсканирован `classes.dex`:
+```
+com/freenet/bypass/mobile/FreenetEngine   ← реальные классы
+com/freenet/bypass/mobile/Mobile
+com/freenet/bypass/mobile/SocketProtector
+```
+
+**Исправление (v1.8.5):** Все `Class.forName("com.freenet.bypass.*")` заменены на
+`Class.forName("com.freenet.bypass.mobile.*")`.
+
+---
+
+### ERR-ANDROID-04: gomobile int → Java long (не int)
+
+**Версии:** v1.0–v1.8.5  
+**Симптом:** Go engine кратко показывал "загружен" (зелёный), сразу падал в "Kotlin fallback".
+
+**Причина:** `gomobile` конвертирует Go `int` → Java `long` (не `int`).
+
+Реальные сигнатуры (`javap` на `FreenetEngine.class` из mobile.aar):
+```java
+void startVPNSimple(long, long)        // второй параметр — long, не int!
+void startVPN(long, long, SocketProtector)
+String getRecentLogs(long)
+```
+
+Код вызывал:
+- `getMethod("startVPNSimple", Long.TYPE, Integer.TYPE)` → `NoSuchMethodException`
+- Падал в legacy path → там тоже `Integer.TYPE` → `NoSuchMethodException`
+- Возвращал `false` → "Kotlin fallback только TCP"
+
+**Верификация:** `javap -p com/freenet/bypass/mobile/FreenetEngine.class` из classes.jar AAR.
+
+**Исправление (v1.8.6):**
+```kotlin
+// Было:
+.getMethod("startVPNSimple", Long.TYPE, Integer.TYPE)
+.invoke(eng, tunFd, SOCKS5_PORT)
+
+// Стало:
+.getMethod("startVPNSimple", Long.TYPE, Long.TYPE)
+.invoke(eng, tunFd, SOCKS5_PORT.toLong())
+```
+Аналогично для `startVPN` и `getRecentLogs`.
+
+---
+
+### ERR-ANDROID-05: java.lang.reflect.Proxy может не работать с gobind callbacks
+
+**Версии:** v1.8.3–v1.8.5 (в legacy path)  
+**Статус:** Устранён архитектурно
+
+**Причина:** gobind (runtime JNI bridge) может не вызывать callbacks через
+`java.lang.reflect.Proxy` надёжно на всех Android устройствах/версиях.
+
+**Исправление (v1.8.4):** Добавлен `StartVPNSimple(tunFd, port)` в Go engine —
+не требует SocketProtector совсем, так как процесс FreeNet уже исключён из VPN
+через `addDisallowedApplication(packageName)`.
+

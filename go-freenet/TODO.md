@@ -18,7 +18,9 @@
 | 10 | Test coverage ~70%+ + GitHub files | v1.9.0 | ✅ Завершена |
 | 11 | Test coverage ~90%+ | v1.9.1 | ✅ Завершена |
 | 12 | Smoke testing + Platform verification | v1.9.1 | ✅ Завершена |
-| 13 | Android Go engine fix + full verification | v1.8.1 | ✅ Завершена |
+| 13 | Android: StartVPNSimple, DNS fallback, диагностика | v1.8.4 | ✅ Завершена |
+| 14 | Android: правильное имя пакета gomobile | v1.8.5 | ✅ Завершена |
+| 15 | Android: gomobile int→long, все reflection вызовы | v1.8.6 | ✅ Завершена |
 
 ---
 

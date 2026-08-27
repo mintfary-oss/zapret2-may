@@ -15,6 +15,9 @@
 11. [Сборка и деплой](#11-сборка-и-деплой)
 12. [CI/CD pipeline](#12-cicd-pipeline)
 13. [Безопасность](#13-безопасность)
+14. [gomobile reflection: правила](#14-gomobile-reflection-правила)
+12. [CI/CD pipeline](#12-cicd-pipeline)
+13. [Безопасность](#13-безопасность)
 
 ---
 
@@ -1140,3 +1143,91 @@ FreeNet использует DoH — максимальная приватнос
 - Не обходит авторизацию на сайтах
 
 FreeNet только помогает установить соединение с заблокированным ресурсом, обходя DPI-блокировку по SNI и DNS-подмену.
+
+---
+
+## 14. gomobile reflection: правила
+
+Этот раздел критически важен при любых изменениях в `FreenetVpnService.kt`.
+
+### Команда сборки AAR
+
+```bash
+gomobile bind \
+  -target android/arm64,android/arm,android/amd64 \
+  -androidapi 26 \
+  -javapkg com.freenet.bypass \
+  -o dist/mobile.aar \
+  ./mobile
+```
+
+### Правило 1: Java-пакет = javapkg + Go-пакет
+
+`-javapkg com.freenet.bypass` + Go package `mobile` → Java package `com.freenet.bypass.mobile`
+
+```kotlin
+// ПРАВИЛЬНО:
+Class.forName("com.freenet.bypass.mobile.Mobile")
+Class.forName("com.freenet.bypass.mobile.FreenetEngine")
+Class.forName("com.freenet.bypass.mobile.SocketProtector")
+
+// НЕПРАВИЛЬНО (ClassNotFoundException):
+Class.forName("com.freenet.bypass.Mobile")
+```
+
+### Правило 2: Go int → Java long (НЕ int)
+
+gomobile конвертирует Go `int` → Java `long`. Всегда использовать `Long.TYPE`.
+
+```kotlin
+// ПРАВИЛЬНО — используй Long.TYPE для Go int параметров:
+.getMethod("startVPNSimple", java.lang.Long.TYPE, java.lang.Long.TYPE)
+.invoke(eng, tunFd, SOCKS5_PORT.toLong())   // ← toLong() обязателен!
+
+.getMethod("getRecentLogs", java.lang.Long.TYPE)
+.invoke(goEngine, n.toLong())
+
+// НЕПРАВИЛЬНО (NoSuchMethodException):
+.getMethod("startVPNSimple", java.lang.Long.TYPE, java.lang.Integer.TYPE)
+```
+
+### Правило 3: Go int64/int → Java long, Go string → Java String, Go bool → Java boolean
+
+| Go тип | Java тип | Kotlin TYPE константа |
+|--------|----------|-----------------------|
+| `int64` / `int` | `long` | `java.lang.Long.TYPE` |
+| `int32` | `int` | `java.lang.Integer.TYPE` |
+| `string` | `String` | `String::class.java` |
+| `bool` | `boolean` | `java.lang.Boolean.TYPE` |
+| `*Struct` | `Struct` | `Class.forName("pkg.Struct")` |
+
+### Правило 4: invoke() — передавай примитивы через .toLong()/.toInt()
+
+```kotlin
+// Kotlin Int/Long в invoke() нужно явно конвертировать для примитивных параметров:
+.invoke(eng, tunFd, SOCKS5_PORT.toLong())   // ✓
+.invoke(eng, tunFd, SOCKS5_PORT)             // ✗ — может вызвать IllegalArgumentException
+```
+
+### Верификация сигнатур
+
+Для проверки реальных сигнатур скачать `mobile.aar` из релиза и запустить `javap`:
+
+```bash
+curl -sL https://github.com/mintfary-oss/zapret2-may/releases/latest/download/mobile.aar \
+  -o mobile.aar
+unzip -q mobile.aar classes.jar
+mkdir cls && cd cls && jar -xf ../classes.jar
+javap -p com/freenet/bypass/mobile/FreenetEngine.class
+```
+
+Ожидаемый вывод (v1.8.6+):
+```java
+void startVPNSimple(long, long) throws java.lang.Exception;
+void startVPN(long, long, com.freenet.bypass.mobile.SocketProtector) throws java.lang.Exception;
+java.lang.String getRecentLogs(long);
+java.lang.String getVersion();
+java.lang.String getStats();
+void setStrategy(java.lang.String);
+void stop();
+```
