@@ -6,9 +6,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -121,6 +124,7 @@ fun FreeNetScreen(
     // Log lines are polled in VpnViewModel and exposed via logs StateFlow.
     val logText            by viewModel.logs.collectAsState()
     val dnsBannerDismissed by viewModel.dnsBannerDismissed.collectAsState()
+    val setupDismissed     by viewModel.setupDismissed.collectAsState()
 
     Scaffold(
         topBar = {
@@ -148,6 +152,11 @@ fun FreeNetScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
+
+            // First-launch permission setup card — shown once until dismissed.
+            if (!setupDismissed) {
+                PermissionSetupCard(onDismiss = viewModel::dismissSetup)
+            }
 
             // Status text.
             StatusLabel(state)
@@ -781,6 +790,165 @@ fun DiagnosticsCard(
                         color      = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// First-launch permission setup card
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Card shown once on first launch to explain and request the permissions
+ * FreeNet needs to work correctly:
+ *
+ *  1. POST_NOTIFICATIONS (Android 13+) — to show the VPN-running notification
+ *     in the status bar.  On older Android this is granted automatically.
+ *
+ *  2. VPN — explained here; the system dialog appears automatically when the
+ *     user taps the big Connect button (no extra step needed).
+ *
+ * Tapping "Готово" persists the dismissal in SharedPreferences so the card
+ * is never shown again.  When VPN is later disconnected, all settings return
+ * to their original state automatically — FreeNet makes no permanent changes.
+ */
+@Composable
+fun PermissionSetupCard(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+
+    // Track notification permission state so the button updates after granting.
+    var notifGranted by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+            } else {
+                true  // Android < 13: granted automatically at install
+            }
+        )
+    }
+
+    // Launcher for the POST_NOTIFICATIONS runtime permission dialog.
+    val notifLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notifGranted = granted
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(12.dp),
+        colors   = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
+    ) {
+        Column(
+            modifier            = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // ── Header ───────────────────────────────────────────────────────
+            Text(
+                text       = "🔐 Разрешения FreeNet",
+                fontWeight = FontWeight.SemiBold,
+                fontSize   = 15.sp,
+                color      = Color(0xFF0D47A1),
+            )
+            Text(
+                text     = "При отключении VPN все настройки вернутся в исходное состояние автоматически.",
+                fontSize = 12.sp,
+                color    = Color(0xFF1565C0),
+            )
+            HorizontalDivider(color = Color(0xFFBBDEFB))
+
+            // ── Permission 1: Notifications ──────────────────────────────────
+            PermissionRow(
+                icon        = if (notifGranted) "✅" else "🔔",
+                title       = "Уведомления",
+                description = "Статус VPN в строке уведомлений (\"FreeNet работает\").",
+                granted     = notifGranted,
+                buttonLabel = "Разрешить уведомления",
+                onRequest   = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
+            )
+
+            HorizontalDivider(color = Color(0xFFBBDEFB))
+
+            // ── Permission 2: VPN ─────────────────────────────────────────────
+            // VPN permission cannot be requested independently — it is shown
+            // automatically by the OS when the user taps the Connect button.
+            PermissionRow(
+                icon        = "🌐",
+                title       = "VPN",
+                description = "Запрашивается автоматически при первом нажатии кнопки Включить.",
+                granted     = true,   // shown as info, not requestable
+                buttonLabel = "",
+                onRequest   = {},
+            )
+
+            HorizontalDivider(color = Color(0xFFBBDEFB))
+
+            // ── Done button ───────────────────────────────────────────────────
+            Button(
+                onClick  = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF1565C0),
+                ),
+            ) {
+                Text(
+                    text     = if (notifGranted) "Готово ✓" else "Продолжить без уведомлений",
+                    fontSize = 14.sp,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Single permission row inside [PermissionSetupCard].
+ *
+ * Shows icon, title, description.  If [granted] is false and [buttonLabel]
+ * is non-empty, shows an outlined request button.
+ */
+@Composable
+private fun PermissionRow(
+    icon:        String,
+    title:       String,
+    description: String,
+    granted:     Boolean,
+    buttonLabel: String,
+    onRequest:   () -> Unit,
+) {
+    Row(
+        modifier          = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(text = icon, fontSize = 22.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text       = title,
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color      = Color(0xFF0D47A1),
+            )
+            Text(
+                text     = description,
+                fontSize = 11.sp,
+                color    = Color(0xFF1565C0),
+            )
+        }
+        if (!granted && buttonLabel.isNotEmpty()) {
+            OutlinedButton(
+                onClick = onRequest,
+                colors  = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Color(0xFF1565C0),
+                ),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            ) {
+                Text(text = buttonLabel, fontSize = 11.sp)
             }
         }
     }

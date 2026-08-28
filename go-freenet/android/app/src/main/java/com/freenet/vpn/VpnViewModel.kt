@@ -270,6 +270,31 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // -------------------------------------------------------------------------
+    // First-launch permission setup
+    // -------------------------------------------------------------------------
+
+    /**
+     * Key used to persist whether the user has completed the first-launch
+     * permission setup screen.  Once dismissed it is never shown again.
+     */
+    private val SETUP_PREF_KEY = "setup_dismissed"
+
+    private val _setupDismissed = MutableStateFlow(
+        prefs.getBoolean(SETUP_PREF_KEY, false)
+    )
+    /**
+     * True after the user taps "Готово" on the first-launch setup card.
+     * Persisted in SharedPreferences so the card is shown only once.
+     */
+    val setupDismissed: StateFlow<Boolean> = _setupDismissed.asStateFlow()
+
+    /** Called when the user completes / dismisses the first-launch setup card. */
+    fun dismissSetup() {
+        prefs.edit().putBoolean(SETUP_PREF_KEY, true).apply()
+        _setupDismissed.value = true
+    }
+
+    // -------------------------------------------------------------------------
     // Diagnostic report
     // -------------------------------------------------------------------------
 

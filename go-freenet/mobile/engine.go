@@ -147,7 +147,7 @@ func (e *FreenetEngine) IsRunning() bool {
 
 // GetVersion returns the FreeNet version string.
 func (e *FreenetEngine) GetVersion() string {
-	return "1.9.3"
+	return "1.9.4"
 }
 
 // GetErrorCount returns the number of error-level messages recorded since
