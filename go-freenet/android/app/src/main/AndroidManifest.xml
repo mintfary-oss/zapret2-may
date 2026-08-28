@@ -3,6 +3,12 @@
 
     <!-- Required for VpnService (TUN interface, no root needed). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+        Required by ConnectivityManager.getNetworkCapabilities() used in
+        setUnderlyingNetworksCompat() to identify the physical networks
+        the VPN runs on top of.  This is a NORMAL (auto-granted) permission.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
