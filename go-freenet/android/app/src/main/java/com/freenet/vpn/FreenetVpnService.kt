@@ -170,6 +170,9 @@ class FreenetVpnService : VpnService() {
         } catch (e: Exception) {
             Log.e(TAG, "startVpn failed: $e")
             isRunning.set(false)
+            // Always broadcast ACTION_STOP so the UI leaves the CONNECTING state.
+            // (stopVpn() guards on isRunning so it can't send it here — we do it directly.)
+            sendBroadcast(Intent(ACTION_STOP).setPackage(packageName))
             stopSelf()
         }
     }
@@ -261,8 +264,12 @@ class FreenetVpnService : VpnService() {
         // Tell Android which physical networks this VPN runs on top of.
         // Without this, Chrome/Edge detect a "network change" the moment the
         // TUN interface appears and abort active connections with ERR_NETWORK_CHANGED.
-        // Passing the current active Wi-Fi / cellular network prevents that.
-        setUnderlyingNetworksCompat()
+        // Wrapped in try-catch: a failure here must never block VPN startup.
+        try {
+            setUnderlyingNetworksCompat()
+        } catch (e: Exception) {
+            Log.w(TAG, "setUnderlyingNetworks failed (non-fatal): $e")
+        }
 
         return pfd
     }
