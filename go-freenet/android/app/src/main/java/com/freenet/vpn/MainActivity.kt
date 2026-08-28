@@ -859,8 +859,9 @@ fun DnsSetupCard(onDismiss: () -> Unit) {
                     OutlinedButton(
                         onClick  = {
                             context.startActivity(
-                                Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
                             )
                         },
                         modifier = Modifier.weight(1f),
