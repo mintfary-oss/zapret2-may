@@ -858,11 +858,9 @@ fun DnsSetupCard(onDismiss: () -> Unit) {
                     // Direct shortcut on Android 10+.
                     OutlinedButton(
                         onClick  = {
-                            context.startActivity(
-                                Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                }
-                            )
+                            val intent = Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS)
+                            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            context.startActivity(intent)
                         },
                         modifier = Modifier.weight(1f),
                         colors   = ButtonDefaults.outlinedButtonColors(
