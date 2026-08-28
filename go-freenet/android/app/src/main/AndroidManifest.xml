@@ -69,4 +69,55 @@
         </receiver>
 
     </application>
+
+    <!--
+        Android 11+ (API 30) package-visibility rules: without explicit <queries>
+        declarations, PackageManager.getPackageInfo() throws NameNotFoundException
+        for every app that isn't in the list below, so the DNS-setup browser
+        detection card would always show "no browsers found".
+        https://developer.android.com/training/package-visibility
+    -->
+    <queries>
+        <!-- Google Chrome family -->
+        <package android:name="com.android.chrome" />
+        <package android:name="com.chrome.beta" />
+        <package android:name="com.chrome.dev" />
+        <package android:name="com.chrome.canary" />
+        <!-- Yandex Browser -->
+        <package android:name="com.yandex.browser" />
+        <package android:name="com.yandex.browser.beta" />
+        <package android:name="com.yandex.browser.lite" />
+        <!-- Mozilla Firefox -->
+        <package android:name="org.mozilla.firefox" />
+        <package android:name="org.mozilla.firefox_beta" />
+        <package android:name="org.mozilla.fenix" />
+        <!-- Brave -->
+        <package android:name="com.brave.browser" />
+        <package android:name="com.brave.browser_beta" />
+        <package android:name="com.brave.browser_nightly" />
+        <!-- Microsoft Edge -->
+        <package android:name="com.microsoft.emmx" />
+        <package android:name="com.microsoft.emmx.beta" />
+        <!-- Opera -->
+        <package android:name="com.opera.browser" />
+        <package android:name="com.opera.browser.beta" />
+        <package android:name="com.opera.gx_mobile" />
+        <package android:name="com.opera.mini.native" />
+        <!-- Samsung Internet -->
+        <package android:name="com.sec.android.app.sbrowser" />
+        <!-- Kiwi -->
+        <package android:name="com.kiwibrowser.browser" />
+        <!-- DuckDuckGo -->
+        <package android:name="com.duckduckgo.mobile.android" />
+        <!-- OEM browsers -->
+        <package android:name="com.mi.globalbrowser" />
+        <package android:name="com.huawei.browser" />
+        <package android:name="com.vivo.browser" />
+        <package android:name="com.heytap.browser" />
+        <!-- Other -->
+        <package android:name="com.naver.whale.android" />
+        <package android:name="com.UCMobile.intl" />
+        <package android:name="mark.via.gp" />
+    </queries>
+
 </manifest>
