@@ -13,9 +13,6 @@ import android.util.Log
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import android.content.pm.PackageManager
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 
 /**
  * FreenetVpnService manages the full VPN lifecycle:
@@ -48,7 +45,9 @@ class FreenetVpnService : VpnService() {
         private const val TUN_PREFIX  = 24
 
         /** DNS server routed through the bypass engine (intercepted via DoH). */
-        private const val DNS_SERVER = "1.1.1.1"
+        private const val DNS_SERVER   = "1.1.1.1"
+        /** Secondary DNS — Android uses this if the primary doesn't respond. */
+        private const val DNS_SERVER_2 = "8.8.8.8"
 
         /** Android notification channel id. */
         private const val NOTIFICATION_CHANNEL_ID = "freenet_vpn"
@@ -218,6 +217,7 @@ class FreenetVpnService : VpnService() {
             .addAddress(TUN_ADDRESS, TUN_PREFIX)
             .addRoute("0.0.0.0", 0)
             .addDnsServer(DNS_SERVER)
+            .addDnsServer(DNS_SERVER_2)  // fallback; both are intercepted via DoH by the Go TUN
             .setMtu(1400) // leave headroom for any encapsulation / fragmentation
 
         // Per-app split-tunnel configuration.
@@ -275,26 +275,19 @@ class FreenetVpnService : VpnService() {
     }
 
     /**
-     * Calls [VpnService.setUnderlyingNetworks] with the current active networks
-     * so Chrome and other browsers do not see the VPN as a network-change event.
-     * Passing `null` means "inherit from the system" which also works, but some
-     * OEM ROMs handle it differently — we prefer to pass explicit networks.
+     * Informs Android that this VPN runs on top of the current default network.
+     *
+     * Passing null means "let Android use the default network as underlying",
+     * which prevents Chrome/Edge from seeing TUN creation as a network-change
+     * event (ERR_NETWORK_CHANGED) WITHOUT affecting how Android routes DNS
+     * queries for apps.  Passing explicit Network objects can cause Android 10+
+     * to route app DNS queries directly to those networks' DNS servers,
+     * bypassing the VPN's TUN DNS interception (resulting in "Address not found"
+     * for all sites).
      */
     private fun setUnderlyingNetworksCompat() {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager ?: run {
-            setUnderlyingNetworks(null)
-            return
-        }
-        val active: Array<Network> = cm.allNetworks.filter { network ->
-            val caps = cm.getNetworkCapabilities(network) ?: return@filter false
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-        }.toTypedArray()
-
-        // If we found physical networks pass them; otherwise fall back to null
-        // (Android will pick the underlying network automatically).
-        setUnderlyingNetworks(if (active.isNotEmpty()) active else null)
-        Log.d(TAG, "setUnderlyingNetworks: ${active.size} network(s) set")
+        setUnderlyingNetworks(null)
+        Log.d(TAG, "setUnderlyingNetworks(null): Android will use default network")
     }
 
     /** Checks whether a package is installed without throwing. */
