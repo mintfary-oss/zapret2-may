@@ -86,6 +86,7 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
             when (intent.action) {
                 FreenetVpnService.ACTION_START -> {
                     _connectionState.value = ConnectionState.CONNECTED
+                    _reloadBannerVisible.value = true   // remind user to refresh browser tabs
                     startPolling()
                 }
                 FreenetVpnService.ACTION_STOP -> {
@@ -245,6 +246,21 @@ class VpnViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Returns true when [pkg] is currently in the split-tunnel app list. */
     fun isSplitTunnelApp(pkg: String): Boolean = pkg in _splitTunnel.value.apps
+
+    // -------------------------------------------------------------------------
+    // Reload-browser banner
+    // -------------------------------------------------------------------------
+
+    /**
+     * Shown once per VPN session when the connection reaches CONNECTED state.
+     * Not persisted — it reappears on the next VPN connect to remind users
+     * that pages open before VPN started need a manual refresh.
+     */
+    private val _reloadBannerVisible = MutableStateFlow(false)
+    val reloadBannerVisible: StateFlow<Boolean> = _reloadBannerVisible.asStateFlow()
+
+    /** Called by the Compose UI when the user dismisses the reload banner. */
+    fun dismissReloadBanner() { _reloadBannerVisible.value = false }
 
     // -------------------------------------------------------------------------
     // DNS setup banner
