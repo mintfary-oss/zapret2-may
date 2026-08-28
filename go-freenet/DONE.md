@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.9.5 — Phase 19: ERR_NETWORK_CHANGED fix + Auto-detect on connect + Reload banner ✅
+## Текущая версия: v1.9.6 — Phase 20: Hotfix — VPN зависал в CONNECTING (ACCESS_NETWORK_STATE) ✅
 
 ---
 
@@ -252,6 +252,24 @@ freenet.exe -install
 `-telegram-chat-id` в `main.go`.
 
 ---
+
+---
+
+## Phase 20 — Hotfix: VPN зависал в CONNECTING (v1.9.6) ✅
+
+### Проблема
+После обновления до v1.9.5 VPN зависал в состоянии «ПОДКЛЮЧЕНИЕ...» навсегда и никогда не подключался.
+
+### Причина
+`setUnderlyingNetworksCompat()` вызывает `ConnectivityManager.getNetworkCapabilities()`, которому нужно разрешение `ACCESS_NETWORK_STATE`. Без него — `SecurityException`. Исключение ловилось в `startVpn()`, но `ACTION_STOP` не отправлялся (потому что `stopVpn()` выходит если `isRunning == false`). UI навсегда застревал в CONNECTING.
+
+### Исправления ✅
+
+| Исправление | Файл |
+|-------------|------|
+| `ACCESS_NETWORK_STATE` добавлен в манифест | AndroidManifest.xml |
+| `setUnderlyingNetworksCompat()` обёрнут в try-catch | FreenetVpnService.kt |
+| `ACTION_STOP` явно отправляется при ошибке `startVpn()` | FreenetVpnService.kt |
 
 ---
 
