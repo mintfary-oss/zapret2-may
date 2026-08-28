@@ -9,7 +9,6 @@ import android.content.pm.ApplicationInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -858,9 +857,10 @@ fun DnsSetupCard(onDismiss: () -> Unit) {
                     // Direct shortcut on Android 10+.
                     OutlinedButton(
                         onClick  = {
-                            val intent = Intent(Settings.ACTION_PRIVATE_DNS_SETTINGS)
-                            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            context.startActivity(intent)
+                            // ACTION_PRIVATE_DNS_SETTINGS = "android.settings.PRIVATE_DNS_SETTINGS"
+                            // Using the string literal avoids a compile-time reference to the
+                            // API 29 constant while still being guarded by the runtime SDK check above.
+                            context.startActivity(Intent("android.settings.PRIVATE_DNS_SETTINGS"))
                         },
                         modifier = Modifier.weight(1f),
                         colors   = ButtonDefaults.outlinedButtonColors(
