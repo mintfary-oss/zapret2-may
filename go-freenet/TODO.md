@@ -26,6 +26,7 @@
 | 18 | Auto-block DoT port 853 + DNS Setup Card | v1.9.1 | ✅ Завершена |
 | 19 | ERR_NETWORK_CHANGED + AutoDetect + Reload banner | v1.9.5 | ✅ Завершена |
 | 20 | Hotfix: VPN stuck CONNECTING (ACCESS_NETWORK_STATE) | v1.9.6 | ✅ Завершена |
+| 21 | Hotfix: DNS broken (setUnderlyingNetworks → null) | v1.9.7 | ✅ Завершена |
 
 ---
 

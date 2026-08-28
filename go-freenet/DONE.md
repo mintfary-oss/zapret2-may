@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.9.6 — Phase 20: Hotfix — VPN зависал в CONNECTING (ACCESS_NETWORK_STATE) ✅
+## Текущая версия: v1.9.7 — Phase 21: Hotfix — DNS не работал (setUnderlyingNetworks → null) ✅
 
 ---
 
@@ -252,6 +252,29 @@ freenet.exe -install
 `-telegram-chat-id` в `main.go`.
 
 ---
+
+---
+
+## Phase 21 — Hotfix: DNS не работал для всех сайтов (v1.9.7) ✅
+
+### Симптом
+После включения VPN (v1.9.6): «Адрес не найден» в браузере для ЛЮБОГО сайта. В логе — ноль DNS-ошибок, ноль DoH-запросов.
+
+### Корневая причина
+`setUnderlyingNetworks(physicalNetworks)` с явным списком сетей (добавлен в v1.9.5) меняет поведение DNS на **Android 10+**:
+- Android перенаправляет DNS-запросы от приложений на DNS-серверы подлежащих сетей (DNS провайдера)
+- Запросы минуют TUN → DoH-перехватчик Go не получает ни одного запроса
+- Диагностика: 0 ошибок, 0 DoH-соединений — потому что запросы вообще не входят в TUN
+
+### Исправление ✅
+
+| Изменение | Файл |
+|-----------|------|
+| `setUnderlyingNetworksCompat()` → `setUnderlyingNetworks(null)` | FreenetVpnService.kt |
+| Добавлен вторичный DNS-сервер `8.8.8.8` | FreenetVpnService.kt |
+| Убраны ненужные импорты ConnectivityManager/Network | FreenetVpnService.kt |
+
+`null` = «Android использует сеть по умолчанию». ERR_NETWORK_CHANGED предотвращается, DNS через TUN сохраняется.
 
 ---
 
