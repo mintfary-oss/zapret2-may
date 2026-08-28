@@ -6,9 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.net.Uri
 import android.net.VpnService
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -793,78 +791,140 @@ fun DiagnosticsCard(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Metadata for one browser's DNS/security settings deep-link.
+ * Metadata for one browser entry in the DNS setup card.
  *
- * [settingsUri] is sent via [Intent.ACTION_VIEW] targeted at [packageName].
- * All Chromium-based browsers handle their own scheme://settings/... URIs
- * natively.  Firefox handles about:config.  For browsers where the URI may
- * not navigate to exactly the right page, a fallback opens the app launcher.
+ * [settingsHint] is a human-readable navigation path shown below the browser
+ * button so the user knows exactly what to tap after the browser opens.
+ * Internal settings URIs (chrome://settings/…, about:config, etc.) are NOT
+ * used because Android blocks external apps from opening browser-internal pages
+ * for security reasons — they either open the browser home page, open multiple
+ * blank tabs, or do nothing at all.
  */
 private data class BrowserDnsInfo(
     val packageName: String,
     val displayName: String,
-    val settingsUri: String,
+    val settingsHint: String,   // step-by-step path shown as text below the button
 )
 
 /**
  * Known browsers ordered by Russian market share.
- * Only browsers whose [settingsUri] reliably opens a security/DNS page are
- * listed.  The list is filtered at runtime to installed packages only.
+ * All entries show the exact in-browser navigation path the user must follow
+ * after the button opens the browser.
  */
 private val BROWSER_DNS_LIST = listOf(
-    // ── Google Chrome family (Chromium: chrome://settings/security) ──────────
-    BrowserDnsInfo("com.android.chrome",           "Chrome",            "chrome://settings/security"),
-    BrowserDnsInfo("com.chrome.beta",              "Chrome Beta",       "chrome://settings/security"),
-    BrowserDnsInfo("com.chrome.dev",               "Chrome Dev",        "chrome://settings/security"),
-    BrowserDnsInfo("com.chrome.canary",            "Chrome Canary",     "chrome://settings/security"),
-    // ── Yandex Browser (Chromium: browser://settings) ────────────────────────
-    BrowserDnsInfo("com.yandex.browser",           "Яндекс Браузер",    "browser://settings"),
-    BrowserDnsInfo("com.yandex.browser.beta",      "Яндекс Бета",       "browser://settings"),
-    BrowserDnsInfo("com.yandex.browser.lite",      "Яндекс Лайт",       "browser://settings"),
+    // ── Google Chrome family ──────────────────────────────────────────────────
+    BrowserDnsInfo("com.android.chrome",
+        "Chrome",
+        "⋮ → Настройки → Конфиденциальность → Безопасность → Использовать защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.chrome.beta",
+        "Chrome Beta",
+        "⋮ → Настройки → Конфиденциальность → Безопасность → Использовать защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.chrome.dev",
+        "Chrome Dev",
+        "⋮ → Настройки → Конфиденциальность → Безопасность → Использовать защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.chrome.canary",
+        "Chrome Canary",
+        "⋮ → Настройки → Конфиденциальность → Безопасность → Использовать защищённый DNS → ВЫКЛ"),
+    // ── Yandex Browser ───────────────────────────────────────────────────────
+    BrowserDnsInfo("com.yandex.browser",
+        "Яндекс Браузер",
+        "≡ → Настройки → Безопасность → Защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.yandex.browser.beta",
+        "Яндекс Бета",
+        "≡ → Настройки → Безопасность → Защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.yandex.browser.lite",
+        "Яндекс Лайт",
+        "≡ → Настройки → Безопасность → Защищённый DNS → ВЫКЛ"),
     // ── Mozilla Firefox ──────────────────────────────────────────────────────
-    BrowserDnsInfo("org.mozilla.firefox",          "Firefox",           "about:config"),
-    BrowserDnsInfo("org.mozilla.firefox_beta",     "Firefox Beta",      "about:config"),
-    BrowserDnsInfo("org.mozilla.fenix",            "Firefox Nightly",   "about:config"),
-    // ── Brave (Chromium: brave://settings/security) ───────────────────────────
-    BrowserDnsInfo("com.brave.browser",            "Brave",             "brave://settings/security"),
-    BrowserDnsInfo("com.brave.browser_beta",       "Brave Beta",        "brave://settings/security"),
-    BrowserDnsInfo("com.brave.browser_nightly",    "Brave Nightly",     "brave://settings/security"),
-    // ── Microsoft Edge (Chromium: edge://settings/privacy) ───────────────────
-    BrowserDnsInfo("com.microsoft.emmx",           "Edge",              "edge://settings/privacy"),
-    BrowserDnsInfo("com.microsoft.emmx.beta",      "Edge Beta",         "edge://settings/privacy"),
-    // ── Opera (Chromium: opera://settings) ───────────────────────────────────
-    BrowserDnsInfo("com.opera.browser",            "Opera",             "opera://settings"),
-    BrowserDnsInfo("com.opera.browser.beta",       "Opera Beta",        "opera://settings"),
-    BrowserDnsInfo("com.opera.gx_mobile",          "Opera GX",          "opera://settings"),
-    BrowserDnsInfo("com.opera.mini.native",        "Opera Mini",        "opera://settings"),
+    BrowserDnsInfo("org.mozilla.firefox",
+        "Firefox",
+        "≡ → Настройки → Конфиденциальность → DNS через HTTPS → ВЫКЛ"),
+    BrowserDnsInfo("org.mozilla.firefox_beta",
+        "Firefox Beta",
+        "≡ → Настройки → Конфиденциальность → DNS через HTTPS → ВЫКЛ"),
+    BrowserDnsInfo("org.mozilla.fenix",
+        "Firefox Nightly",
+        "≡ → Настройки → Конфиденциальность → DNS через HTTPS → ВЫКЛ"),
+    // ── Brave ────────────────────────────────────────────────────────────────
+    BrowserDnsInfo("com.brave.browser",
+        "Brave",
+        "⋮ → Настройки → Конфиденциальность → Использовать защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.brave.browser_beta",
+        "Brave Beta",
+        "⋮ → Настройки → Конфиденциальность → Использовать защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.brave.browser_nightly",
+        "Brave Nightly",
+        "⋮ → Настройки → Конфиденциальность → Использовать защищённый DNS → ВЫКЛ"),
+    // ── Microsoft Edge ───────────────────────────────────────────────────────
+    BrowserDnsInfo("com.microsoft.emmx",
+        "Edge",
+        "… → Настройки → Конфиденциальность → Безопасность → Использовать защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.microsoft.emmx.beta",
+        "Edge Beta",
+        "… → Настройки → Конфиденциальность → Безопасность → Использовать защищённый DNS → ВЫКЛ"),
+    // ── Opera ────────────────────────────────────────────────────────────────
+    BrowserDnsInfo("com.opera.browser",
+        "Opera",
+        "O → Настройки → Конфиденциальность → DNS-over-HTTPS → ВЫКЛ"),
+    BrowserDnsInfo("com.opera.browser.beta",
+        "Opera Beta",
+        "O → Настройки → Конфиденциальность → DNS-over-HTTPS → ВЫКЛ"),
+    BrowserDnsInfo("com.opera.gx_mobile",
+        "Opera GX",
+        "O → Настройки → Конфиденциальность → DNS-over-HTTPS → ВЫКЛ"),
+    BrowserDnsInfo("com.opera.mini.native",
+        "Opera Mini",
+        "O → Настройки → Дополнительно → DNS-over-HTTPS → ВЫКЛ"),
     // ── Samsung Internet ─────────────────────────────────────────────────────
-    BrowserDnsInfo("com.sec.android.app.sbrowser", "Samsung Internet",  "about:settings"),
-    // ── Kiwi (Chromium: chrome://settings/security) ──────────────────────────
-    BrowserDnsInfo("com.kiwibrowser.browser",      "Kiwi",              "chrome://settings/security"),
-    // ── DuckDuckGo ────────────────────────────────────────────────────────────
-    BrowserDnsInfo("com.duckduckgo.mobile.android","DuckDuckGo",        "duck://settings/privacy"),
+    BrowserDnsInfo("com.sec.android.app.sbrowser",
+        "Samsung Internet",
+        "≡ → Настройки → Конфиденциальность → DNS over HTTPS → ВЫКЛ"),
+    // ── Kiwi ─────────────────────────────────────────────────────────────────
+    BrowserDnsInfo("com.kiwibrowser.browser",
+        "Kiwi",
+        "⋮ → Настройки → Конфиденциальность → Безопасность → Использовать защищённый DNS → ВЫКЛ"),
+    // ── DuckDuckGo ───────────────────────────────────────────────────────────
+    BrowserDnsInfo("com.duckduckgo.mobile.android",
+        "DuckDuckGo",
+        "≡ → Настройки → Конфиденциальность → Private DNS → ВЫКЛ"),
     // ── OEM browsers ─────────────────────────────────────────────────────────
-    BrowserDnsInfo("com.mi.globalbrowser",         "Mi Browser",        "miui://browser/settings"),
-    BrowserDnsInfo("com.huawei.browser",           "Huawei Browser",    "hwbrowser://settings"),
-    BrowserDnsInfo("com.vivo.browser",             "Vivo Browser",      "vivobrowser://settings"),
-    BrowserDnsInfo("com.heytap.browser",           "OPPO Browser",      "browser://settings"),
+    BrowserDnsInfo("com.mi.globalbrowser",
+        "Mi Browser",
+        "≡ → Настройки → Безопасность → Защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.huawei.browser",
+        "Huawei Browser",
+        "≡ → Настройки → Безопасность → DNS-over-HTTPS → ВЫКЛ"),
+    BrowserDnsInfo("com.vivo.browser",
+        "Vivo Browser",
+        "≡ → Настройки → Безопасность → Защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.heytap.browser",
+        "OPPO Browser",
+        "≡ → Настройки → Безопасность → DNS-over-HTTPS → ВЫКЛ"),
     // ── Other ────────────────────────────────────────────────────────────────
-    BrowserDnsInfo("com.naver.whale.android",      "Whale",             "whale://settings"),
-    BrowserDnsInfo("com.UCMobile.intl",            "UC Browser",        "ucbrowser://settings"),
-    BrowserDnsInfo("mark.via.gp",                  "Via",               "via://settings"),
+    BrowserDnsInfo("com.naver.whale.android",
+        "Whale",
+        "≡ → Настройки → Конфиденциальность → Защищённый DNS → ВЫКЛ"),
+    BrowserDnsInfo("com.UCMobile.intl",
+        "UC Browser",
+        "≡ → Настройки → Безопасность → DNS → ВЫКЛ"),
+    BrowserDnsInfo("mark.via.gp",
+        "Via",
+        "≡ → Настройки → Прокси → DNS-over-HTTPS → ВЫКЛ"),
 )
 
 /**
  * DNS setup card — shown once after VPN connects, dismissed permanently on tap.
  *
- * Structure:
- *  1. Android Private DNS — one button → system settings (Android 10+).
- *  2. Per installed browser — one button each → browser's security/DNS page.
+ * Step 1: Opens Android Private DNS settings via a fallback chain of intent
+ * actions (OEMs use different action strings; we try them in order and fall
+ * back to a manual path Toast if none work).
  *
- * Each browser button sends [Intent.ACTION_VIEW] with the browser-specific
- * settings URI targeted at that browser's package, so the user lands directly
- * on the right page with a single tap.  If the URI is not handled, the button
- * falls back to the browser's launcher intent.
+ * Step 2: For each installed browser — one button that opens the browser's
+ * home screen, plus a persistent hint line showing the exact in-browser
+ * navigation path to the Secure DNS toggle.  Internal settings URIs such as
+ * chrome://settings/security are intentionally NOT used here because Android
+ * blocks external apps from opening browser-internal pages; they cause blank
+ * tabs, multiple windows, or silence.
  */
 @Composable
 fun DnsSetupCard(onDismiss: () -> Unit) {
@@ -877,8 +937,6 @@ fun DnsSetupCard(onDismiss: () -> Unit) {
             catch (_: Exception) { false }
         }
     }
-
-    val canOpenAndroidDns = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q  // API 29
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -905,35 +963,43 @@ fun DnsSetupCard(onDismiss: () -> Unit) {
                 fontWeight = FontWeight.Medium,
                 color      = Color(0xFF5D4037),
             )
-            if (canOpenAndroidDns) {
-                Button(
-                    onClick  = {
-                        // String literal for "android.settings.PRIVATE_DNS_SETTINGS"
-                        // avoids a compile-time reference to the API 29 constant.
-                        // FLAG_ACTIVITY_NEW_TASK is required when LocalContext is not
-                        // an Activity instance (occurs on some OEM Compose paths).
-                        context.startActivity(
-                            Intent("android.settings.PRIVATE_DNS_SETTINGS")
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF6D4C41)),
-                ) {
-                    Text("Открыть настройки DNS Android  →", fontSize = 13.sp)
-                }
-                Text(
-                    text     = "Выбрать «Выключить» и вернуться.",
-                    fontSize = 11.sp,
-                    color    = Color(0xFF795548),
-                )
-            } else {
-                Text(
-                    text     = "Настройки → Подключения → Другие настройки → Частный DNS → Выключить",
-                    fontSize = 12.sp,
-                    color    = Color(0xFF5D4037),
-                )
+            // Try a chain of action strings — OEMs (Samsung, Xiaomi, Huawei)
+            // may not register android.settings.PRIVATE_DNS_SETTINGS.
+            // We fall back through wireless settings to the root settings screen,
+            // and if all fail, show a Toast with the manual navigation path.
+            Button(
+                onClick  = {
+                    val fallbackActions = listOf(
+                        "android.settings.PRIVATE_DNS_SETTINGS",   // stock Android 9+
+                        "android.settings.WIRELESS_SETTINGS",       // all Androids
+                        "android.settings.SETTINGS",                // last resort
+                    )
+                    val opened = fallbackActions.any { action ->
+                        try {
+                            context.startActivity(
+                                Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                            true
+                        } catch (_: Exception) { false }
+                    }
+                    if (!opened) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Настройки → Подключения → Другие сети → Частный DNS → Выключить",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF6D4C41)),
+            ) {
+                Text("Открыть настройки DNS Android  →", fontSize = 13.sp)
             }
+            Text(
+                text     = "Найти «Частный DNS» и выбрать «Выключить».",
+                fontSize = 11.sp,
+                color    = Color(0xFF795548),
+            )
 
             // ── Step 2: Browser Secure DNS ───────────────────────────────────
             HorizontalDivider(color = Color(0xFFFFECB3))
@@ -943,6 +1009,11 @@ fun DnsSetupCard(onDismiss: () -> Unit) {
                 fontWeight = FontWeight.Medium,
                 color      = Color(0xFF5D4037),
             )
+            Text(
+                text     = "Нажмите кнопку → откроется браузер → следуйте подсказке.",
+                fontSize = 11.sp,
+                color    = Color(0xFF795548),
+            )
 
             if (installedBrowsers.isEmpty()) {
                 Text(
@@ -951,42 +1022,41 @@ fun DnsSetupCard(onDismiss: () -> Unit) {
                     color    = Color(0xFF795548),
                 )
             } else {
-                // One button per installed browser — direct deep-link to its settings.
+                // Each browser: one launch button + a persistent navigation hint below it.
+                // Internal settings URIs (chrome://settings/…, about:config, etc.) are
+                // blocked by Android from external apps, so we open the browser normally
+                // and show the user the exact tap path to reach the DNS toggle.
                 installedBrowsers.forEach { info ->
-                    OutlinedButton(
-                        onClick  = {
-                            try {
-                                // Open browser-specific settings URI targeted at that package.
-                                // FLAG_ACTIVITY_NEW_TASK ensures the intent is dispatched
-                                // even when LocalContext is not an Activity instance.
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.settingsUri))
-                                intent.setPackage(info.packageName)
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                context.startActivity(intent)
-                            } catch (_: Exception) {
-                                // URI not handled — fall back to launching the browser normally.
-                                val fallback = context.packageManager
-                                    .getLaunchIntentForPackage(info.packageName)
-                                fallback?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                if (fallback != null) context.startActivity(fallback)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors   = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color(0xFF4E342E),
-                        ),
+                    Column(
+                        modifier            = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
+                        OutlinedButton(
+                            onClick  = {
+                                val intent = context.packageManager
+                                    .getLaunchIntentForPackage(info.packageName)
+                                    ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                if (intent != null) context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors   = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color(0xFF4E342E),
+                            ),
+                        ) {
+                            Text(
+                                text     = "Открыть ${info.displayName}  →",
+                                fontSize = 13.sp,
+                            )
+                        }
+                        // Navigation hint — always visible, user reads it before/after tapping.
                         Text(
-                            text     = "${info.displayName} — настройки безопасности  →",
-                            fontSize = 13.sp,
+                            text     = info.settingsHint,
+                            fontSize = 11.sp,
+                            color    = Color(0xFF6D4C41),
+                            modifier = Modifier.padding(start = 6.dp),
                         )
                     }
                 }
-                Text(
-                    text     = "В каждом браузере найдите «Защищённый DNS» и выключите.",
-                    fontSize = 11.sp,
-                    color    = Color(0xFF795548),
-                )
             }
 
             // ── Dismiss ──────────────────────────────────────────────────────
