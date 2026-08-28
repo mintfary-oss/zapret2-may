@@ -13,6 +13,9 @@ import android.util.Log
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 
 /**
  * FreenetVpnService manages the full VPN lifecycle:
@@ -252,8 +255,39 @@ class FreenetVpnService : VpnService() {
             }
         }
 
-        return builder.establish()
+        val pfd = builder.establish()
             ?: throw IllegalStateException("VpnService.Builder.establish() returned null")
+
+        // Tell Android which physical networks this VPN runs on top of.
+        // Without this, Chrome/Edge detect a "network change" the moment the
+        // TUN interface appears and abort active connections with ERR_NETWORK_CHANGED.
+        // Passing the current active Wi-Fi / cellular network prevents that.
+        setUnderlyingNetworksCompat()
+
+        return pfd
+    }
+
+    /**
+     * Calls [VpnService.setUnderlyingNetworks] with the current active networks
+     * so Chrome and other browsers do not see the VPN as a network-change event.
+     * Passing `null` means "inherit from the system" which also works, but some
+     * OEM ROMs handle it differently — we prefer to pass explicit networks.
+     */
+    private fun setUnderlyingNetworksCompat() {
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager ?: run {
+            setUnderlyingNetworks(null)
+            return
+        }
+        val active: Array<Network> = cm.allNetworks.filter { network ->
+            val caps = cm.getNetworkCapabilities(network) ?: return@filter false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        }.toTypedArray()
+
+        // If we found physical networks pass them; otherwise fall back to null
+        // (Android will pick the underlying network automatically).
+        setUnderlyingNetworks(if (active.isNotEmpty()) active else null)
+        Log.d(TAG, "setUnderlyingNetworks: ${active.size} network(s) set")
     }
 
     /** Checks whether a package is installed without throwing. */
@@ -269,6 +303,22 @@ class FreenetVpnService : VpnService() {
     // -------------------------------------------------------------------------
     // Engine control (strategy, logs, stats) — called by ViewModel / UI
     // -------------------------------------------------------------------------
+
+    /**
+     * Triggers background auto-detection of the best bypass strategy via the
+     * Go engine's RunAutoDetect method.  The Go side probes strategies against
+     * www.youtube.com:443 in a separate goroutine and applies the winner
+     * automatically — this call returns immediately.
+     * No-op when the Go engine is not loaded.
+     */
+    private fun runAutoDetect() {
+        try {
+            goEngine?.javaClass?.getMethod("runAutoDetect")?.invoke(goEngine)
+            Log.i(TAG, "auto-detect: triggered")
+        } catch (e: Exception) {
+            Log.w(TAG, "auto-detect: not available (${e.message})")
+        }
+    }
 
     /**
      * Changes the active bypass strategy on the running Go engine.
@@ -379,6 +429,10 @@ class FreenetVpnService : VpnService() {
         if (goEngine != null) {
             goEngineActive = true
             engineStatus = engineStatus.replace("загружен ✓", "активен ✓")
+            // Trigger background auto-detect so the engine probes strategies
+            // against www.youtube.com:443 and self-tunes for the current ISP.
+            // This runs in a goroutine inside Go so it doesn't block the TUN loop.
+            runAutoDetect()
         }
         val aarPresent = tryStartGoVPN(tunFd)
         if (!aarPresent) {

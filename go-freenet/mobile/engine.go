@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mintfary-oss/freenet/internal/bypass"
 	"github.com/mintfary-oss/freenet/internal/config"
 	"github.com/mintfary-oss/freenet/internal/logs"
 	"github.com/mintfary-oss/freenet/internal/proxy"
@@ -125,6 +126,28 @@ func (e *FreenetEngine) GetStrategy() string {
 		return e.server.Strategy()
 	}
 	return "none"
+}
+
+// RunAutoDetect probes a set of bypass strategies against a well-known blocked
+// target (www.youtube.com:443) and automatically applies the winning strategy
+// to the running proxy.
+//
+// The method is non-blocking from the caller's perspective — it runs in a
+// background goroutine and calls [FreenetEngine.SetStrategy] with the winner
+// once probing finishes.  If the proxy is not running the winner is still
+// cached and applied automatically when [FreenetEngine.Start] is next called.
+//
+// Returns immediately with an empty string; use [FreenetEngine.GetStrategy] to
+// observe the active strategy once detection completes.
+func (e *FreenetEngine) RunAutoDetect() {
+	go func() {
+		strategies := []string{"split", "tlsrec", "combined", "disorder"}
+		log.Printf("auto-detect: probing against www.youtube.com:443 …")
+		bypass.GlobalDetector().Run("www.youtube.com:443", strategies, 2)
+		winner := bypass.GlobalDetector().Winner()
+		log.Printf("auto-detect: winner = %s — applying", winner)
+		e.SetStrategy(winner)
+	}()
 }
 
 // SetBypassEnabled enables or disables the DPI bypass without stopping the

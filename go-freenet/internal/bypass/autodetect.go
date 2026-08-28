@@ -21,16 +21,21 @@ type AutoDetector struct {
 
 var globalDetector = &AutoDetector{}
 
+// GlobalDetector returns the package-level AutoDetector singleton used by
+// the auto bypass strategy.  Use this from the mobile package to trigger
+// background probing on Android where the web UI is not available.
+func GlobalDetector() *AutoDetector { return globalDetector }
+
 // Winner returns the last detected winning strategy.
-// Returns "tlsrec" before any probe has run: TLS record splitting is the most
-// universally effective bypass against ТСПУ (Russian DPI boxes) because it
-// forces the DPI system to reassemble TLS records before inspection — a more
-// expensive operation that many ТСПУ implementations skip.
+// Returns "split" before any probe has run: TCP split is the broadest
+// first-try bypass against ТСПУ that works on both HTTP and HTTPS without
+// requiring extra TTL tuning.  The real winner is set after RunAutoDetect
+// completes.
 func (d *AutoDetector) Winner() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.winner == "" {
-		return "tlsrec"
+		return "split"
 	}
 	return d.winner
 }
@@ -73,7 +78,7 @@ func probeStrategy(target, strategy string, splitPos int) types.ProbeResult {
 	}
 	defer conn.Close()
 
-	probe := buildMinimalClientHello("example.com")
+	probe := buildMinimalClientHello("www.youtube.com")
 
 	switch strategy {
 	case "split":

@@ -266,9 +266,9 @@ func TestEngine_HostlistEnabled_DomainPresent(t *testing.T) {
 
 func TestAutoDetector_Winner_Default(t *testing.T) {
 	d := &AutoDetector{}
-	// Default is "tlsrec" — most effective against Russian ТСПУ DPI boxes.
-	if got := d.Winner(); got != "tlsrec" {
-		t.Errorf("empty AutoDetector.Winner() = %q, want tlsrec", got)
+	// Default is "split" — broadest first-try bypass before probing completes.
+	if got := d.Winner(); got != "split" {
+		t.Errorf("empty AutoDetector.Winner() = %q, want split", got)
 	}
 }
 

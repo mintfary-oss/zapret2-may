@@ -123,8 +123,9 @@ fun FreeNetScreen(
     val engineStatus       by viewModel.engineStatus.collectAsState()
     // Log lines are polled in VpnViewModel and exposed via logs StateFlow.
     val logText            by viewModel.logs.collectAsState()
-    val dnsBannerDismissed by viewModel.dnsBannerDismissed.collectAsState()
-    val setupDismissed     by viewModel.setupDismissed.collectAsState()
+    val dnsBannerDismissed   by viewModel.dnsBannerDismissed.collectAsState()
+    val setupDismissed       by viewModel.setupDismissed.collectAsState()
+    val reloadBannerVisible  by viewModel.reloadBannerVisible.collectAsState()
 
     Scaffold(
         topBar = {
@@ -178,6 +179,12 @@ fun FreeNetScreen(
             // Stats card (visible only when connected).
             if (state == VpnViewModel.ConnectionState.CONNECTED && stats.isNotEmpty()) {
                 StatsCard(statsJson = stats)
+            }
+
+            // Reload-browser banner — shown once every time VPN connects.
+            // Reminds the user to refresh any tabs that were open before VPN started.
+            if (state == VpnViewModel.ConnectionState.CONNECTED && reloadBannerVisible) {
+                ReloadBrowserBanner(onDismiss = viewModel::dismissReloadBanner)
             }
 
             // DNS setup card — shown once when VPN is active until dismissed.
@@ -1079,6 +1086,80 @@ private val BROWSER_DNS_LIST = listOf(
         "Via",
         "≡ → Настройки → Прокси → DNS-over-HTTPS → ВЫКЛ"),
 )
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reload-browser banner
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Lightweight banner shown every time the VPN connects.
+ *
+ * Pages that were loaded *before* the VPN started may still be using the
+ * pre-VPN network path.  A simple pull-to-refresh or tap on the address bar
+ * is enough to fix them.  This banner explains exactly what to do and
+ * provides a one-tap button to open the default browser.
+ */
+@Composable
+fun ReloadBrowserBanner(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(12.dp),
+        colors   = CardDefaults.cardColors(
+            containerColor = Color(0xFF1B5E20),   // dark green — "all good, just refresh"
+        ),
+    ) {
+        Column(
+            modifier            = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text       = "✅ VPN включён",
+                color      = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize   = 15.sp,
+            )
+            Text(
+                text     = "Если сайт не открывается — обновите страницу в браузере: потяните вниз или нажмите ↻",
+                color    = Color(0xFFB9F6CA),
+                fontSize = 13.sp,
+            )
+            Row(
+                modifier            = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = {
+                        // Open the default browser so the user can refresh.
+                        val intent = Intent(Intent.ACTION_MAIN).apply {
+                            addCategory(Intent.CATEGORY_APP_BROWSER)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        try { ctx.startActivity(intent) } catch (_: Exception) {
+                            // No browser found; ignore — hint is still visible.
+                        }
+                        onDismiss()
+                    },
+                    colors  = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4CAF50),
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Открыть браузер", fontSize = 12.sp)
+                }
+                OutlinedButton(
+                    onClick  = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    colors   = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFF81C784),
+                    ),
+                ) {
+                    Text("Понятно", fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
 
 /**
  * DNS setup card — shown once after VPN connects, dismissed permanently on tap.
