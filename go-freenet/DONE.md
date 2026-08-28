@@ -1,6 +1,6 @@
 # Что сделано — FreeNet Go
 
-## Текущая версия: v1.9.1 — Phase 18: Auto-block DoT + DNS Setup Card ✅
+## Текущая версия: v1.9.5 — Phase 19: ERR_NETWORK_CHANGED fix + Auto-detect on connect + Reload banner ✅
 
 ---
 
@@ -252,6 +252,43 @@ freenet.exe -install
 `-telegram-chat-id` в `main.go`.
 
 ---
+
+---
+
+## Phase 19 — ERR_NETWORK_CHANGED fix + Auto-detect on connect + Reload banner (v1.9.5) ✅
+
+### Проблема
+После включения VPN браузер выдавал ERR_NETWORK_CHANGED и переставал загружать сайты. Стратегия auto на Android никогда не проводила реального пробинга — движок работал на дефолтном tlsrec без подстройки под провайдера. Пользователю было непонятно, что нужно обновить страницу.
+
+### 19.1 setUnderlyingNetworks — fixes ERR_NETWORK_CHANGED ✅
+
+`FreenetVpnService.setUnderlyingNetworksCompat()` вызывается сразу после `VpnService.Builder.establish()`:
+
+- Получает список активных физических сетей через `ConnectivityManager.allNetworks`
+- Фильтрует: только сети с `NET_CAPABILITY_INTERNET`, без `TRANSPORT_VPN`
+- Передаёт их в `VpnService.setUnderlyingNetworks(networks)`
+- Fallback: если сети не найдены → `setUnderlyingNetworks(null)` (Android выбирает сам)
+
+**Эффект:** Android помечает VPN как «работающий поверх текущей сети». Chrome/Edge не видят TUN как отдельную сеть → ERR_NETWORK_CHANGED исчезает.
+
+### 19.2 RunAutoDetect на Android ✅
+
+| Компонент | Изменение |
+|-----------|-----------|
+| `bypass/autodetect.go` | Цель пробинга: `www.youtube.com:443` (заблокирован у РФ провайдеров) |
+| `bypass/autodetect.go` | Дефолт до завершения пробинга: `split` (вместо `tlsrec`) |
+| `bypass/autodetect.go` | `GlobalDetector()` — публичный аксессор к синглтону |
+| `mobile/engine.go` | `RunAutoDetect()` — запускает горутину пробинга, применяет winner |
+| `FreenetVpnService.kt` | Вызов `runAutoDetect()` через reflection сразу после старта VPN |
+
+**Эффект:** При каждом включении VPN движок автоматически подбирает лучшую стратегию для текущего провайдера за ~5–15 секунд в фоне.
+
+### 19.3 ReloadBrowserBanner ✅
+
+Зелёная карточка появляется при каждом подключении VPN:
+- **«Открыть браузер»** — запускает дефолтный браузер через `Intent.CATEGORY_APP_BROWSER`, скрывает карточку
+- **«Понятно»** — скрывает карточку (без persist — появится при следующем подключении)
+- State хранится в `VpnViewModel._reloadBannerVisible` (не SharedPreferences)
 
 ---
 

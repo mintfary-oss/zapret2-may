@@ -879,3 +879,54 @@ String getRecentLogs(long)         // ← параметр long, не int!
 - `startVPN(Long.TYPE, Long.TYPE, protectorCls)` + `.invoke(eng, tunFd, SOCKS5_PORT.toLong(), ...)`
 - `getRecentLogs(Long.TYPE)` + `.invoke(goEngine, n.toLong())`
 
+
+---
+
+## Phase 19 — ERR_NETWORK_CHANGED + Auto-detect на Android + Reload banner (v1.9.5)
+
+### Проблема пользователя
+> "После включения VPN браузер выдаёт ERR_NETWORK_CHANGED и сайты не грузятся. Выключил Private DNS и Secure DNS в Chrome — всё равно не работает."
+
+### Диагностика (из отчёта)
+
+```
+Движок: Go engine v1.9.4 — активен ✓
+Обход DPI: ВКЛЮЧЕНО ✓
+Стратегия: auto
+Ошибок в логе: 0
+```
+
+- ERR_NETWORK_CHANGED — Android регистрирует TUN-интерфейс как новую сеть, Chrome обрывает соединения
+- Стратегия auto никогда не запускала реальный пробинг на Android (Web UI недоступен)
+- Цель пробинга `example.com` не заблокирована → все стратегии казались работающими
+
+### Исправления v1.9.5
+
+**1. setUnderlyingNetworks**
+```kotlin
+private fun setUnderlyingNetworksCompat() {
+    val active = cm.allNetworks.filter { network ->
+        caps.hasCapability(NET_CAPABILITY_INTERNET) &&
+            !caps.hasTransport(TRANSPORT_VPN)
+    }.toTypedArray()
+    setUnderlyingNetworks(if (active.isNotEmpty()) active else null)
+}
+```
+Вызывается после `establish()`. Android знает что VPN = обёртка над существующей сетью → Chrome не видит смену.
+
+**2. RunAutoDetect() в Go + вызов на старте VPN**
+```go
+func (e *FreenetEngine) RunAutoDetect() {
+    go func() {
+        bypass.GlobalDetector().Run("www.youtube.com:443", strategies, 2)
+        e.SetStrategy(bypass.GlobalDetector().Winner())
+    }()
+}
+```
+Kotlin-сторона вызывает `runAutoDetect()` через reflection сразу после `goEngineActive = true`.
+
+**3. ReloadBrowserBanner**
+Зелёная карточка при каждом подключении:
+- «Открыть браузер» → `Intent.CATEGORY_APP_BROWSER` + dismiss
+- «Понятно» → dismiss (не persistent, появится снова при следующем подключении)
+

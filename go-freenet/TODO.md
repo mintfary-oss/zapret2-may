@@ -24,6 +24,7 @@
 | 16 | Phase 16 — 4 critical TUN/proxy bugs | v1.8.8 | ✅ Завершена |
 | 17 | Diagnostics Monitor + Report Tab + Download/Copy | v1.9.0 | ✅ Завершена |
 | 18 | Auto-block DoT port 853 + DNS Setup Card | v1.9.1 | ✅ Завершена |
+| 19 | ERR_NETWORK_CHANGED + AutoDetect + Reload banner | v1.9.5 | ✅ Завершена |
 
 ---
 
