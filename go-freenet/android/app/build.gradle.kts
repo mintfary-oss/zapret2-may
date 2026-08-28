@@ -30,8 +30,8 @@ android {
         applicationId = "com.freenet.vpn"
         minSdk    = 26       // Android 8.0 — minimum for reliable VpnService
         targetSdk = 35
-        versionCode = 191
-        versionName = "1.9.1"
+        versionCode = 192
+        versionName = "1.9.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

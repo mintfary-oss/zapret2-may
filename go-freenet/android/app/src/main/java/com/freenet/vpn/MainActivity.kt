@@ -910,7 +910,12 @@ fun DnsSetupCard(onDismiss: () -> Unit) {
                     onClick  = {
                         // String literal for "android.settings.PRIVATE_DNS_SETTINGS"
                         // avoids a compile-time reference to the API 29 constant.
-                        context.startActivity(Intent("android.settings.PRIVATE_DNS_SETTINGS"))
+                        // FLAG_ACTIVITY_NEW_TASK is required when LocalContext is not
+                        // an Activity instance (occurs on some OEM Compose paths).
+                        context.startActivity(
+                            Intent("android.settings.PRIVATE_DNS_SETTINGS")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF6D4C41)),
@@ -952,13 +957,17 @@ fun DnsSetupCard(onDismiss: () -> Unit) {
                         onClick  = {
                             try {
                                 // Open browser-specific settings URI targeted at that package.
+                                // FLAG_ACTIVITY_NEW_TASK ensures the intent is dispatched
+                                // even when LocalContext is not an Activity instance.
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.settingsUri))
                                 intent.setPackage(info.packageName)
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 context.startActivity(intent)
                             } catch (_: Exception) {
                                 // URI not handled — fall back to launching the browser normally.
                                 val fallback = context.packageManager
                                     .getLaunchIntentForPackage(info.packageName)
+                                fallback?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 if (fallback != null) context.startActivity(fallback)
                             }
                         },
